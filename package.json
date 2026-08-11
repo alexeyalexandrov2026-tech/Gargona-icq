@@ -1,6 +1,6 @@
 {
-  "name": "gorgona-chat",
-  "version": "1.0.0",
+  "name": "gargona-icq",
+  "version": "1.0.1",
   "private": true,
   "description": "Gorgona Chat — public web chat with unique invite links, Cloudflare Durable Objects and Supabase.",
   "type": "module",
