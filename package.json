@@ -1,0 +1,16 @@
+{
+  "name": "gorgona-chat",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Gorgona Chat — public web chat with unique invite links, Cloudflare Durable Objects and Supabase.",
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "check": "wrangler types",
+    "test:syntax": "node --check src/index.js && node --check src/chat-room.js && node --check public/app.js"
+  },
+  "devDependencies": {
+    "wrangler": "^4.28.0"
+  }
+}

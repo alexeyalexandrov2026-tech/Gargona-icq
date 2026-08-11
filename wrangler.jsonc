@@ -1,0 +1,39 @@
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "gorgona-chat",
+  "main": "src/index.js",
+  "compatibility_date": "2026-08-10",
+  "compatibility_flags": ["web_socket_auto_reply_to_close"],
+
+  "assets": {
+    "directory": "./public",
+    "binding": "ASSETS",
+    "not_found_handling": "single-page-application"
+  },
+
+  "durable_objects": {
+    "bindings": [
+      {
+        "name": "CHAT_ROOMS",
+        "class_name": "ChatRoom"
+      }
+    ]
+  },
+
+  "migrations": [
+    {
+      "tag": "v1",
+      "new_sqlite_classes": ["ChatRoom"]
+    }
+  ],
+
+  "vars": {
+    "APP_NAME": "Gorgona Chat"
+  },
+
+  "env": {
+    "production": {
+      "name": "gorgona-chat"
+    }
+  }
+}

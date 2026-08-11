@@ -1,0 +1,8 @@
+# Local Cloudflare Worker secrets.
+# Copy to .dev.vars for `wrangler dev`.
+SUPABASE_URL=https://YOUR_PROJECT.supabase.co
+SUPABASE_SECRET_KEY=sb_secret_REPLACE_ME
+
+# Optional. Used only if you later enable the Gorgona AI endpoint.
+OPENAI_API_KEY=
+OPENAI_MODEL=gpt-5.6
