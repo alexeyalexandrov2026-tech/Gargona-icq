@@ -1,0 +1,143 @@
+import { DurableObject } from "cloudflare:workers";
+import { insert, select } from "./supabase.js";
+import { cleanMessage } from "./security.js";
+
+export class ChatRoom extends DurableObject {
+  constructor(ctx, env) {
+    super(ctx, env);
+    this.env = env;
+  }
+
+  async fetch(request) {
+    const url = new URL(request.url);
+
+    // Internal notification from Worker when a participant joins via HTTP
+    if (url.pathname === "/presence" && request.method === "POST") {
+      try {
+        const payload = await request.json();
+        if (payload?.type === "participant_joined" && payload.participant) {
+          const roomId = payload.participant.room_id;
+          if (roomId) {
+            this.broadcast(roomId, {
+              type: "participant_joined",
+              participant: payload.participant
+            });
+          }
+        }
+      } catch (e) {
+        console.error("presence notify failed", e);
+      }
+      return new Response(null, { status: 204 });
+    }
+
+    if (url.pathname !== "/ws" || request.headers.get("Upgrade")?.toLowerCase() !== "websocket") {
+      return new Response("Not found", { status: 404 });
+    }
+
+    const roomId = url.searchParams.get("roomId");
+    const participantId = url.searchParams.get("participantId");
+    if (!roomId || !participantId) {
+      return new Response("Missing roomId or participantId", { status: 400 });
+    }
+
+    const pair = new WebSocketPair();
+    const [client, server] = Object.values(pair);
+
+    this.ctx.acceptWebSocket(server, [`room:${roomId}`, `participant:${participantId}`]);
+    server.serializeAttachment({ roomId, participantId });
+    this.broadcast(roomId, { type: "presence", participantId, online: true }, server);
+
+    return new Response(null, { status: 101, webSocket: client });
+  }
+
+  async webSocketMessage(ws, message) {
+    let payload;
+    try {
+      payload = JSON.parse(message);
+    } catch {
+      return;
+    }
+
+    const meta = ws.deserializeAttachment() || {};
+    const roomId = meta.roomId;
+    const participantId = meta.participantId;
+
+    if (!roomId || !participantId) return;
+
+    if (payload.type === "participant_joined") {
+      this.broadcast(roomId, {
+        type: "participant_joined",
+        participant: payload.participant
+      });
+      return;
+    }
+
+    if (payload.type === "typing") {
+      this.broadcast(roomId, {
+        type: "typing",
+        participantId,
+        typing: Boolean(payload.typing)
+      }, ws);
+      return;
+    }
+
+    if (payload.type !== "message") return;
+
+    const body = cleanMessage(payload.body);
+    if (!body) return;
+
+    try {
+      const rows = await insert(this.env, "chat_messages", {
+        room_id: roomId,
+        participant_id: participantId,
+        body
+      });
+      const saved = rows?.[0];
+      if (!saved) return;
+
+      const people = await select(
+        this.env,
+        "chat_participants",
+        `select=id,display_name&room_id=eq.${encodeURIComponent(roomId)}&id=eq.${encodeURIComponent(participantId)}`
+      );
+      const person = people?.[0];
+
+      this.broadcast(roomId, {
+        type: "message",
+        message: {
+          id: saved.id,
+          participant_id: saved.participant_id,
+          name: person?.display_name || "Participant",
+          body: saved.body,
+          created_at: saved.created_at
+        }
+      });
+    } catch (error) {
+      console.error("message persistence failed", error);
+      ws.send(JSON.stringify({ type: "error", message: "Message could not be saved." }));
+    }
+  }
+
+  async webSocketClose(ws) {
+    const meta = ws.deserializeAttachment() || {};
+    if (meta.roomId && meta.participantId) {
+      this.broadcast(meta.roomId, {
+        type: "presence",
+        participantId: meta.participantId,
+        online: false
+      }, ws);
+    }
+  }
+
+  async webSocketError(ws, error) {
+    console.error("Gorgona Chat WebSocket error", error);
+  }
+
+  broadcast(roomId, payload, except = null) {
+    const data = JSON.stringify(payload);
+    for (const ws of this.ctx.getWebSockets(`room:${roomId}`)) {
+      if (ws === except || ws.readyState !== WebSocket.OPEN) continue;
+      ws.send(data);
+    }
+  }
+}
