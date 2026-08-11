@@ -26,6 +26,13 @@
     }
   ],
 
+  "r2_buckets": [
+    {
+      "binding": "MEDIA",
+      "bucket_name": "gargona-chat-media"
+    }
+  ],
+
   "vars": {
     "APP_NAME": "Gorgona Chat"
   }
