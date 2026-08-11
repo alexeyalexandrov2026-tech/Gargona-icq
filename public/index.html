@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#10100f">
+<title>Горгона-чат</title>
+<link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+<div class="app">
+  <aside class="sidebar" id="sidebar">
+    <div class="brand"><div class="brand-mark">G</div><div><b>GORGONA</b><small>CHAT</small></div></div>
+    <button class="new-chat" id="newChat">＋ Новый чат</button>
+    <div class="label">КОМНАТА</div>
+    <div id="roomCard" class="room-card hidden"><span class="live-dot"></span><div><b id="roomTitle">Gorgona Chat</b><small id="roomId"></small></div></div>
+    <div class="label">УЧАСТНИКИ</div>
+    <div id="participants"></div>
+    <div class="side-bottom"><button class="outline" id="copyInvite">↗ Скопировать ссылку</button><small class="local"><span></span> SECURE WEB CHAT</small></div>
+  </aside>
+
+  <main class="main">
+    <header>
+      <div class="head-left"><button class="menu" id="menu">☰</button><div><small>PRIVATE ROOM</small><h1 id="headerTitle">Горгона-чат</h1></div></div>
+      <div class="head-right"><button class="icon" id="invite" title="Пригласить">♣</button><span id="status">● Offline</span></div>
+    </header>
+
+    <section class="messages" id="messages">
+      <div class="welcome">
+        <div class="hero-mark">G</div>
+        <h2>Горгона-чат</h2>
+        <p>Приватная переписка в браузере. Создай комнату и отправь уникальную ссылку.</p>
+        <button class="new-chat" id="createRoom">Создать комнату</button>
+      </div>
+    </section>
+
+    <div class="typing hidden" id="typing"></div>
+
+    <form class="composer" id="composer">
+      <button type="button" class="plus" id="plus">＋</button>
+      <input id="messageInput" maxlength="4000" autocomplete="off" placeholder="Введите сообщение…">
+      <button class="send" type="submit">➤</button>
+    </form>
+  </main>
+</div>
+
+<div class="modal hidden" id="modal">
+  <div class="modal-card">
+    <button class="close" id="close">×</button>
+    <small>GORGONA CHAT</small>
+    <h2>Войти в комнату</h2>
+    <p>Введите имя, которое увидят участники.</p>
+    <input id="nameInput" maxlength="40" placeholder="Ваше имя">
+    <button class="new-chat full" id="join">Продолжить</button>
+  </div>
+</div>
+<div class="toast" id="toast"></div>
+<script src="/app.js"></script>
+</body>
+</html>
