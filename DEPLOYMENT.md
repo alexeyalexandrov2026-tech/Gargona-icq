@@ -1,38 +1,51 @@
-# Gorgona Chat — Deployment Checklist
+# Gorgona Chat deployment checklist
 
-## 1. Supabase (one time)
-- Create project
-- Run `supabase/migrations/0001_gorgona_chat.sql` in SQL Editor
-- Copy Project URL + create secret key (`sb_secret_...`)
+## 1. Supabase
+Run:
+`supabase/migrations/0001_gorgona_chat.sql`
 
-## 2. Local
+Create a server-side Supabase secret key and keep it private.
+
+## 2. Cloudflare local
 ```bash
 npm install
-cp .dev.vars.example .dev.vars
-# edit .dev.vars with real values
+copy .dev.vars.example .dev.vars
 npm run dev
 ```
 
-## 3. Two-browser test
-Must succeed before production:
-- Create room in browser A
-- Open invite in browser B with different name
-- Messages + presence + typing work both ways
-
-## 4. Production
+## 3. Cloudflare production
 ```bash
 npx wrangler secret put SUPABASE_URL
 npx wrangler secret put SUPABASE_SECRET_KEY
 npm run deploy
 ```
 
-## 5. Custom domain
-Cloudflare Dashboard → Workers → gorgona-chat → Domains & Routes  
-Suggested: `chat.gorgona-one.com`
+## 4. Custom domain
+Cloudflare Dashboard → Workers & Pages → gorgona-chat → Settings / Domains & Routes → add the chosen chat subdomain.
 
-## 6. Before public launch
-- Add authentication
-- Rate limiting
-- Invite revocation
-- Moderation / abuse controls
-- Security headers / CSP
+Suggested:
+`chat.gorgona-one.com`
+
+## 5. Two-browser test
+Browser A:
+- open the public URL
+- Create Chat
+- enter a name
+
+Browser B:
+- open the invite URL
+- enter a different name
+
+Then send messages in both directions.
+
+## 6. Production gate
+Before public launch:
+- add account auth
+- rotate/revoke invites
+- rate-limit room creation and messages
+- add abuse/moderation controls
+- add file storage/scanning
+- add privacy/retention policy
+- add security headers/CSP
+- add monitoring
+- connect the MCP server only after the web chat passes the two-browser test.

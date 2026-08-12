@@ -174,15 +174,6 @@ function connect() {
       return;
     }
 
-    if (payload.type === "participant_joined" && payload.participant) {
-      state.people.set(payload.participant.id, payload.participant);
-      renderPeople();
-      if (payload.participant.id !== state.participantId) {
-        toast(`${payload.participant.display_name} присоединился`);
-      }
-      return;
-    }
-
     if (payload.type === "typing") {
       const person = state.people.get(payload.participantId);
       if (payload.participantId === state.participantId) return;

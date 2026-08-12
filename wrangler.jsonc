@@ -1,8 +1,9 @@
 {
   "$schema": "./node_modules/wrangler/config-schema.json",
-  "name": "gargona-icq",
+  "name": "gorgona-chat",
   "main": "src/index.js",
   "compatibility_date": "2026-08-10",
+  "compatibility_flags": ["web_socket_auto_reply_to_close"],
 
   "assets": {
     "directory": "./public",
@@ -26,14 +27,13 @@
     }
   ],
 
-  "r2_buckets": [
-    {
-      "binding": "MEDIA",
-      "bucket_name": "gargona-chat-media"
-    }
-  ],
-
   "vars": {
     "APP_NAME": "Gorgona Chat"
+  },
+
+  "env": {
+    "production": {
+      "name": "gorgona-chat"
+    }
   }
 }

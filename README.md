@@ -1,113 +1,116 @@
-# Gorgona Chat (Production Ready)
+# GORGONA CHAT
 
-Private invite-link web chat built for Cloudflare.
+Production-oriented web chat for the Gorgona ecosystem.
 
-**Architecture**
-```
-Browser  →  Cloudflare Worker  →  Durable Object (realtime WebSockets)
-                              ↘  Supabase Postgres (persistent data)
-```
+## Product
 
-## What works
+- browser-only, no app install
+- unique private invite links
+- multiple participants
+- realtime messaging
+- online presence
+- typing indicator
+- persistent message history
+- mobile-first UI
+- Cloudflare Worker + Durable Objects
+- Supabase Postgres persistence
+- ready for a custom domain
+- MCP/ChatGPT can be added without changing the web client
 
-- Create private rooms with unique invite links
-- Multiple participants
-- Realtime messaging (WebSocket)
-- Online presence + typing indicator
-- Message history
-- Mobile-first UI
-- Fully serverless on Cloudflare Workers + Durable Objects
-- Supabase as the only database
+## Architecture
 
-## Critical fixes already applied
+Browser
+→ Cloudflare Worker
+→ Durable Object per room for realtime WebSockets
+→ Supabase Postgres for durable data
 
-1. Durable Object now correctly handles internal `/presence` notifications when a user joins.
-2. Frontend updates the participants list live when someone joins.
+Durable Objects are used only for live room coordination. Important data is persisted in Supabase.
 
-## Requirements
+## Local development
 
-- Node.js 20+
-- Cloudflare account
-- Supabase project (free tier is enough)
-
-## 1. Supabase setup (do this once)
-
-1. Create a project at https://supabase.com
-2. Open **SQL Editor** → paste and run the file:
-   `supabase/migrations/0001_gorgona_chat.sql`
-3. Project Settings → API:
-   - Copy **Project URL**
-   - Create a **secret key** (`sb_secret_...`) — keep it private forever
-
-## 2. Local development
+Requirements: Node.js 20+.
 
 ```bash
 npm install
 cp .dev.vars.example .dev.vars
-```
-
-Edit `.dev.vars`:
-
-```
-SUPABASE_URL=https://YOUR_PROJECT.supabase.co
-SUPABASE_SECRET_KEY=sb_secret_YOUR_KEY
-```
-
-Start:
-
-```bash
 npm run dev
 ```
 
-Open the URL shown by Wrangler (normally http://localhost:8787).
+Open the URL printed by Wrangler, normally:
 
-### Two-browser test (must pass)
+`http://localhost:8787`
 
-- Browser A → Create room → copy invite link
-- Browser B → open invite link → enter different name
-- Send messages both ways
-- Check presence + typing indicators
+The same app can be opened from another device on the same LAN if Wrangler is started with:
 
-## 3. Production deploy
+```bash
+npx wrangler dev --ip 0.0.0.0
+```
+
+## Supabase
+
+1. Open Supabase SQL Editor.
+2. Run `supabase/migrations/0001_gorgona_chat.sql`.
+3. Copy the Project URL.
+4. Create a server-side secret key (`sb_secret_...`) in Supabase.
+5. Put it only in `.dev.vars` locally or as a Cloudflare Worker secret in production.
+
+Never expose `SUPABASE_SECRET_KEY` to browser code.
+
+The schema deliberately denies direct client table access. The Worker is the trusted API boundary.
+
+## Cloudflare production
+
+Set the secret:
 
 ```bash
 npx wrangler secret put SUPABASE_URL
 npx wrangler secret put SUPABASE_SECRET_KEY
+```
+
+Deploy:
+
+```bash
 npm run deploy
 ```
 
-Then attach a custom domain in Cloudflare Dashboard  
-(Workers → gorgona-chat → Domains & Routes).
+Then attach the custom domain to the Worker in Cloudflare.
 
-Suggested domain: `chat.gorgona-one.com`
+## Invite URLs
 
-## Security notes
+A room URL looks like:
 
-- Invite tokens are high-entropy and stored only as SHA-256 hashes.
-- Browser never receives the Supabase secret key.
-- Row Level Security is enabled and direct client access is revoked.
-- The Worker is the only trusted boundary.
+`https://chat.example.com/c/<roomId>?invite=<inviteToken>`
 
-Before opening to the unrestricted public, add:
-- Account authentication / OAuth
-- Invite rotation & revocation
-- Rate limiting
-- Abuse / moderation controls
-- CSP + security headers
+The invite token is a high-entropy bearer credential. It is never stored in a public table exposed to the browser.
 
-## MCP / ChatGPT
+## Security before broad public launch
 
-The web chat is independent.  
-A separate authenticated MCP endpoint can be added later without changing the frontend.
+This MVP has room-level bearer invites. Before opening it to an unrestricted public audience, add:
 
-## Scripts
+- authenticated accounts / OAuth
+- invite rotation and revocation UI
+- rate limits
+- message abuse controls
+- file scanning
+- moderation
+- audit logs
+- CSP and security headers
+- origin restrictions
+- CSRF protections for non-idempotent HTTP endpoints
+- privacy/retention policy
 
-| Command            | Purpose                    |
-|--------------------|----------------------------|
-| `npm run dev`      | Local development          |
-| `npm run deploy`   | Deploy to Cloudflare       |
-| `npm run test:syntax` | Quick JS syntax check   |
+## ChatGPT / MCP
 
----
+The web product is independent of ChatGPT.
 
-Built for the Gorgona ecosystem. Ready for production use after the two-browser test passes.
+A separate MCP server should expose narrowly scoped tools such as:
+
+- `create_chat`
+- `get_chat`
+- `list_messages`
+- `send_message`
+- `create_invite`
+
+For hosted ChatGPT, the MCP endpoint must be publicly reachable over HTTPS and authenticated. A private `localhost` endpoint is not directly reachable by hosted ChatGPT.
+
+Do not put an OpenAI API key into the browser.
