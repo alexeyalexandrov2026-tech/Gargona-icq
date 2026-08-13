@@ -1,7 +1,7 @@
 {
   "$schema": "./node_modules/wrangler/config-schema.json",
   "name": "gorgona-chat",
-  "main": "src/index.js",
+  "main": "src/index.mjs",
   "compatibility_date": "2026-08-10",
   "compatibility_flags": ["web_socket_auto_reply_to_close"],
 
