@@ -365,36 +365,48 @@ $("#btnVideoNote").addEventListener("click", () => {
   startVideoNoteViewfinder();
 });
 
+function handleCameraError(err) {
+  console.error("Camera access error:", err);
+  const name = err?.name || "";
+  if (name === "NotAllowedError" || name === "PermissionDeniedError") {
+    toast("Нажмите 🔒 слева от адреса и разрешите Камеру");
+  } else if (name === "NotReadableError" || name === "TrackStartError") {
+    toast("Камера занята другим приложением (Zoom/Discord/Skype)");
+  } else if (name === "NotFoundError" || name === "DevicesNotFoundError") {
+    toast("Веб-камера не обнаружена на устройстве");
+  } else {
+    toast(`Доступ к камере отклонен (${name || "ошибка"})`);
+  }
+}
+
 async function getWebcamStream(audioNeeded = false, facing = "user") {
   if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
     throw new Error("MediaDevices API not supported");
   }
 
-  try {
-    return await navigator.mediaDevices.getUserMedia({
-      video: { facingMode: facing, width: { ideal: 1280 }, height: { ideal: 720 } },
-      audio: audioNeeded
-    });
-  } catch (e1) {
-    console.warn("Attempt 1 with facingMode failed, trying generic video constraint:", e1);
+  const attempts = [
+    { video: true, audio: audioNeeded },
+    { video: { facingMode: facing }, audio: audioNeeded },
+    { video: true, audio: false },
+    { video: { facingMode: facing }, audio: false },
+    { video: { width: { ideal: 640 }, height: { ideal: 480 } }, audio: false }
+  ];
+
+  let lastErr = null;
+  for (const constraints of attempts) {
     try {
-      return await navigator.mediaDevices.getUserMedia({
-        video: true,
-        audio: audioNeeded
-      });
-    } catch (e2) {
-      console.warn("Attempt 2 with audio failed, trying video only:", e2);
-      if (audioNeeded) {
-        return await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
-      }
-      throw e2;
+      const stream = await navigator.mediaDevices.getUserMedia(constraints);
+      if (stream) return stream;
+    } catch (err) {
+      lastErr = err;
     }
   }
+  throw lastErr || new Error("Camera not accessible");
 }
 
 async function startVideoNoteViewfinder() {
   try {
-    toast("Включение камеры…");
+    toast("Подключение камеры…");
     const stream = await getWebcamStream(true, "user");
     state.noteStream = stream;
     $("#noteVideo").srcObject = stream;
@@ -402,8 +414,7 @@ async function startVideoNoteViewfinder() {
     $("#startRecordNote").classList.remove("hidden");
     $("#stopRecordNote").classList.add("hidden");
   } catch (err) {
-    console.error("Camera error", err);
-    toast("Запрещен доступ к камере или вебкамера отключена");
+    handleCameraError(err);
   }
 }
 
@@ -668,8 +679,7 @@ async function startLiveCamera() {
     video.srcObject = stream;
     $("#cameraModal").classList.remove("hidden");
   } catch (err) {
-    console.error("Live camera error", err);
-    toast("Запрещен доступ к камере или вебкамера отключена");
+    handleCameraError(err);
   }
 }
 
