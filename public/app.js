@@ -89,11 +89,9 @@ function addMessage(message) {
           meta.className = "chat-photo-meta";
           const latFixed = Number(parsed.lat).toFixed(5);
           const lonFixed = Number(parsed.lon).toFixed(5);
-          const mapUrl = `https://www.google.com/maps?q=${parsed.lat},${parsed.lon}`;
           meta.innerHTML = `
             <div class="geo-tag">📍 GPS: ${latFixed}°, ${lonFixed}°</div>
-            <small class="time">${parsed.timestamp || ""}</small><br>
-            <a class="map-btn" href="${mapUrl}" target="_blank" rel="noopener">🗺 Открыть на карте</a>
+            <small class="time">${parsed.timestamp || ""}</small>
           `;
           card.appendChild(meta);
         }
