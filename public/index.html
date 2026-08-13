@@ -174,6 +174,30 @@
   </div>
 </div>
 
+<div class="modal hidden" id="cameraDiagModal">
+  <div class="modal-card wide">
+    <button class="close" id="closeCameraDiag">×</button>
+    <small>ДИАГНОСТИКА КАМЕРЫ</small>
+    <h2>Камера не отвечает</h2>
+    <div style="background:#111;border:1px solid #333;border-radius:10px;padding:12px;font-size:11px;color:#eee;margin:12px 0;">
+      <p style="margin:0 0 6px;color:var(--yellow)"><b id="diagErrorTitle">Ошибка доступа</b></p>
+      <div id="diagErrorDetail" style="font-family:monospace;color:#ccc;margin-bottom:8px;">NotReadableError / NotFoundError</div>
+      <div id="diagDeviceCount" style="color:#aaa;">Найдено видеоустройств: проверка…</div>
+    </div>
+    <p style="font-size:11px;color:#aaa;line-height:1.5;">
+      <b>Как включить камеру на ноутбуке:</b><br>
+      1. Проверьте физическую шторку над объективом веб-камеры.<br>
+      2. Нажмите клавишу включения камеры на клавиатуре (Fn + F10 или Fn + F6).<br>
+      3. В Windows: Параметры ➔ Конфиденциальность ➔ Камера ➔ Разрешить доступ.<br>
+      4. В браузере: Нажмите 🔒 слева от адреса сайта и выберите <b>Разрешить камеру</b>.
+    </p>
+    <div class="modal-actions space-between">
+      <button class="outline" id="fallbackDiagFile">📂 Выбрать файл с диска</button>
+      <button class="new-chat" id="retryCameraBtn">🔄 Попробовать снова</button>
+    </div>
+  </div>
+</div>
+
 <input type="file" id="geoInput" accept="image/*" class="hidden">
 <input type="file" id="standardInput" accept="image/*" class="hidden">
 <input type="file" id="videoFileInput" accept="video/*" class="hidden">

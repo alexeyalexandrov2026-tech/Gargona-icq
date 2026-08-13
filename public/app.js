@@ -358,22 +358,46 @@ $("#btnVideoNote").addEventListener("click", () => {
   startVideoNoteViewfinder();
 });
 
-function handleCameraError(err) {
+async function handleCameraError(err) {
   console.error("Camera access error:", err);
-  const name = err?.name || "";
+  const name = err?.name || "UnknownError";
+  const msg = err?.message || String(err);
+
+  let title = "Камера не отвечает";
   if (name === "NotAllowedError" || name === "PermissionDeniedError") {
-    toast("Нажмите 🔒 слева от адреса и разрешите Камеру");
+    title = "Разрешение на камеру заблокировано браузером";
   } else if (name === "NotReadableError" || name === "TrackStartError") {
-    toast("Камера занята другим приложением (Zoom/Discord/Skype)");
+    title = "Камера используется другой программой (Zoom/Discord/Skype)";
   } else if (name === "NotFoundError" || name === "DevicesNotFoundError") {
-    toast("Веб-камера не найдена на ПК. Открываем выбор файлов…");
-    setTimeout(() => {
-      $("#geoInput").click();
-    }, 1200);
-  } else {
-    toast(`Доступ к камере отклонен (${name || "ошибка"})`);
+    title = "Веб-камера не обнаружена системой Windows";
   }
+
+  $("#diagErrorTitle").textContent = title;
+  $("#diagErrorDetail").textContent = `${name}: ${msg}`;
+
+  let devCountText = "Проверка подключенных устройств…";
+  try {
+    if (navigator.mediaDevices && navigator.mediaDevices.enumerateDevices) {
+      const devices = await navigator.mediaDevices.enumerateDevices();
+      const videoDevs = devices.filter(d => d.kind === "videoinput");
+      devCountText = `Найдено видеоустройств: ${videoDevs.length}` + (videoDevs.length > 0 ? ` (${videoDevs.map(d => d.label || "Устройство без названия").join(", ")})` : " (0 вебкамер)");
+    }
+  } catch (e) {
+    devCountText = "Не удалось перечислить устройства";
+  }
+  $("#diagDeviceCount").textContent = devCountText;
+  $("#cameraDiagModal").classList.remove("hidden");
 }
+
+$("#closeCameraDiag").addEventListener("click", () => $("#cameraDiagModal").classList.add("hidden"));
+$("#fallbackDiagFile").addEventListener("click", () => {
+  $("#cameraDiagModal").classList.add("hidden");
+  $("#geoInput").click();
+});
+$("#retryCameraBtn").addEventListener("click", () => {
+  $("#cameraDiagModal").classList.add("hidden");
+  startLiveCamera();
+});
 
 async function getWebcamStream(audioNeeded = false, facing = "user") {
   if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
