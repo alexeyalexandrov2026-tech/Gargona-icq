@@ -6,6 +6,8 @@ export class ChatRoom extends DurableObject {
   constructor(ctx, env) {
     super(ctx, env);
     this.env = env;
+    this.adminParticipantId = null;
+    this.pendingRequests = new Map();
   }
 
   async fetch(request) {
@@ -15,9 +17,13 @@ export class ChatRoom extends DurableObject {
       try {
         const body = await request.json();
         if (body.type === "participant_joined" && body.participant?.room_id) {
+          if (!this.adminParticipantId) {
+            this.adminParticipantId = body.participant.id;
+          }
           this.broadcast(body.participant.room_id, {
             type: "participant_joined",
-            participant: body.participant
+            participant: body.participant,
+            adminId: this.adminParticipantId
           });
         }
       } catch (err) {
@@ -36,12 +42,23 @@ export class ChatRoom extends DurableObject {
       return new Response("Missing roomId or participantId", { status: 400 });
     }
 
+    if (!this.adminParticipantId) {
+      const people = await select(
+        this.env,
+        "chat_participants",
+        `select=id&room_id=eq.${encodeURIComponent(roomId)}&order=created_at.asc&limit=1`
+      );
+      if (people?.[0]) {
+        this.adminParticipantId = people[0].id;
+      }
+    }
+
     const pair = new WebSocketPair();
     const [client, server] = Object.values(pair);
 
     this.ctx.acceptWebSocket(server, [`room:${roomId}`, `participant:${participantId}`]);
     server.serializeAttachment({ roomId, participantId });
-    this.broadcast(roomId, { type: "presence", participantId, online: true }, server);
+    this.broadcast(roomId, { type: "presence", participantId, online: true, adminId: this.adminParticipantId }, server);
 
     return new Response(null, { status: 101, webSocket: client });
   }
@@ -60,10 +77,64 @@ export class ChatRoom extends DurableObject {
 
     if (!roomId || !participantId) return;
 
+    if (payload.type === "join_request") {
+      const reqId = crypto.randomUUID();
+      this.pendingRequests.set(reqId, { ...payload, roomId, socket: ws });
+      
+      const adminSockets = this.ctx.getWebSockets(`participant:${this.adminParticipantId}`);
+      const adminPayload = JSON.stringify({
+        type: "admin_join_request",
+        requestId: reqId,
+        name: payload.name
+      });
+
+      let sentToAdmin = false;
+      for (const adminWs of adminSockets) {
+        if (adminWs.readyState === WebSocket.OPEN) {
+          adminWs.send(adminPayload);
+          sentToAdmin = true;
+        }
+      }
+
+      if (!sentToAdmin) {
+        ws.send(JSON.stringify({ type: "auto_approved", message: "Admin offline, auto approved" }));
+      }
+      return;
+    }
+
+    if (payload.type === "approve_join" && participantId === this.adminParticipantId) {
+      const pending = this.pendingRequests.get(payload.requestId);
+      if (pending && pending.socket?.readyState === WebSocket.OPEN) {
+        pending.socket.send(JSON.stringify({ type: "join_approved", name: pending.name }));
+      }
+      this.pendingRequests.delete(payload.requestId);
+      return;
+    }
+
+    if (payload.type === "decline_join" && participantId === this.adminParticipantId) {
+      const pending = this.pendingRequests.get(payload.requestId);
+      if (pending && pending.socket?.readyState === WebSocket.OPEN) {
+        pending.socket.send(JSON.stringify({ type: "join_declined" }));
+      }
+      this.pendingRequests.delete(payload.requestId);
+      return;
+    }
+
+    if (payload.type === "webrtc_offer" || payload.type === "webrtc_answer" || payload.type === "webrtc_ice_candidate") {
+      this.broadcast(roomId, {
+        type: payload.type,
+        senderId: participantId,
+        targetId: payload.targetId,
+        data: payload.data
+      }, ws);
+      return;
+    }
+
     if (payload.type === "participant_joined") {
       this.broadcast(roomId, {
         type: "participant_joined",
-        participant: payload.participant
+        participant: payload.participant,
+        adminId: this.adminParticipantId
       });
       return;
     }

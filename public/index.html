@@ -22,7 +22,11 @@
   <main class="main">
     <header>
       <div class="head-left"><button class="menu" id="menu">☰</button><div><small>PRIVATE ROOM</small><h1 id="headerTitle">Горгона-чат</h1></div></div>
-      <div class="head-right"><button class="icon" id="invite" title="Пригласить">♧</button><span id="status">● Готов к работе</span></div>
+      <div class="head-right">
+      <button class="icon" id="startVideoCall" title="Видеозвонок">📹</button>
+      <button class="icon" id="invite" title="Пригласить">♧</button>
+      <span id="status">● Готов к работе</span>
+    </div>
     </header>
 
     <section class="messages" id="messages">
@@ -55,15 +59,40 @@
   </div>
 </div>
 
+<div class="modal hidden" id="waitingModal">
+  <div class="modal-card text-center">
+    <small>ЗАЯВКА НА ВХОД</small>
+    <h2>Ожидание администратора…</h2>
+    <p>Администратор чата получил уведомление и должен одобрить ваш вход в комнату.</p>
+    <div class="loading-spinner"></div>
+  </div>
+</div>
+
+<div class="modal hidden" id="adminRequestModal">
+  <div class="modal-card">
+    <small>МОДЕРАЦИЯ ЧАТА</small>
+    <h2>Запрос на вход</h2>
+    <p><b id="adminReqName">Пользователь</b> хочет присоединиться к этой группе.</p>
+    <div class="modal-actions">
+      <button class="outline" id="declineJoinBtn">❌ Отклонить</button>
+      <button class="new-chat" id="approveJoinBtn">✅ Одобрить вход</button>
+    </div>
+  </div>
+</div>
+
 <div class="modal hidden" id="actionModal">
   <div class="modal-card">
     <button class="close" id="closeAction">×</button>
     <small>МЕДИА-МОДУЛЬ</small>
     <h2>Выберите действие</h2>
     <div class="action-buttons">
+      <button class="action-btn" id="btnVideoNote">
+        <span class="icon-big">⭕️</span>
+        <div><b>Видеокружочек (Telegram Note)</b><small>Записать короткую видеозаметку до 30 секунд</small></div>
+      </button>
       <button class="action-btn" id="btnLiveCamera">
         <span class="icon-big">📸</span>
-        <div><b>Живая камера (Вебкамера / Снимок)</b><small>Открыть видоискатель и сделать фото в браузере</small></div>
+        <div><b>Живая камера (Снимок + GPS)</b><small>Открыть видоискатель и сделать фото со штампом</small></div>
       </button>
       <button class="action-btn" id="btnGeoPhoto">
         <span class="icon-big">📂</span>
@@ -73,6 +102,41 @@
         <span class="icon-big">🖼</span>
         <div><b>Обычное фото</b><small>Отправить картинку без штампа координат</small></div>
       </button>
+    </div>
+  </div>
+</div>
+
+<div class="modal hidden" id="videoNoteModal">
+  <div class="modal-card wide text-center">
+    <button class="close" id="closeVideoNote">×</button>
+    <small>ВИДЕОКРУЖОЧЕК TELEGRAM</small>
+    <h2>Запись кружочка</h2>
+    <div class="video-circle-container">
+      <video id="noteVideo" autoplay playsinline muted class="circle-viewfinder"></video>
+      <div class="record-ring-progress" id="recordRing"></div>
+    </div>
+    <div class="modal-actions center">
+      <button class="new-chat record-btn" id="startRecordNote">⏺ Начать запись (до 30 сек)</button>
+      <button class="new-chat hidden stop-btn" id="stopRecordNote">⏹ Завершить и отправить</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal hidden" id="videoCallModal">
+  <div class="modal-card extra-wide">
+    <button class="close" id="closeVideoCall">×</button>
+    <small>ГРУППОВОЙ ВИДЕОЗВОНОК WEBRTC</small>
+    <h2>Видеочат</h2>
+    <div class="video-call-grid" id="videoGrid">
+      <div class="video-slot">
+        <video id="localVideo" autoplay playsinline muted></video>
+        <span class="video-label">Вы (Локальное видео)</span>
+      </div>
+    </div>
+    <div class="modal-actions center margin-top">
+      <button class="outline" id="toggleMic">🎤 Микрофон</button>
+      <button class="outline" id="toggleCam">📹 Камера</button>
+      <button class="new-chat danger" id="leaveCall">🚪 Выйти из звонка</button>
     </div>
   </div>
 </div>
