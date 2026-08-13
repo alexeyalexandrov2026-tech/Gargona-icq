@@ -45,7 +45,7 @@ async function api(request, env, url) {
 
     const rooms = await insert(env, "chat_rooms", { title });
     const room = rooms?.[0];
-    if (!room) return json({ error: "Room creation failed" }, 500);
+    if (!room) return json({ error: "Room creation failed" }, 500, corsHeaders(origin(request)));
 
     await insert(env, "chat_invites", {
       token_hash: tokenHash,

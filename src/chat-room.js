@@ -11,6 +11,21 @@ export class ChatRoom extends DurableObject {
   async fetch(request) {
     const url = new URL(request.url);
 
+    if (url.pathname === "/presence" && request.method === "POST") {
+      try {
+        const body = await request.json();
+        if (body.type === "participant_joined" && body.participant?.room_id) {
+          this.broadcast(body.participant.room_id, {
+            type: "participant_joined",
+            participant: body.participant
+          });
+        }
+      } catch (err) {
+        console.error("Presence error", err);
+      }
+      return new Response("ok", { status: 200 });
+    }
+
     if (url.pathname !== "/ws" || request.headers.get("Upgrade")?.toLowerCase() !== "websocket") {
       return new Response("Not found", { status: 404 });
     }
