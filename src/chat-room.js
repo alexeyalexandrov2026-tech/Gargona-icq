@@ -81,28 +81,27 @@ export class ChatRoom extends DurableObject {
       const reqId = crypto.randomUUID();
       this.pendingRequests.set(reqId, { ...payload, roomId, socket: ws });
       
-      const adminSockets = this.ctx.getWebSockets(`participant:${this.adminParticipantId}`);
-      const adminPayload = JSON.stringify({
+      const adminPayload = {
         type: "admin_join_request",
         requestId: reqId,
         name: payload.name
-      });
+      };
 
-      let sentToAdmin = false;
-      for (const adminWs of adminSockets) {
-        if (adminWs.readyState === WebSocket.OPEN) {
-          adminWs.send(adminPayload);
-          sentToAdmin = true;
+      let recipientCount = 0;
+      for (const clientWs of this.ctx.getWebSockets(`room:${roomId}`)) {
+        if (clientWs !== ws && clientWs.readyState === WebSocket.OPEN) {
+          clientWs.send(JSON.stringify(adminPayload));
+          recipientCount++;
         }
       }
 
-      if (!sentToAdmin) {
-        ws.send(JSON.stringify({ type: "auto_approved", message: "Admin offline, auto approved" }));
+      if (recipientCount === 0) {
+        ws.send(JSON.stringify({ type: "auto_approved", message: "No admin online, auto approved" }));
       }
       return;
     }
 
-    if (payload.type === "approve_join" && participantId === this.adminParticipantId) {
+    if (payload.type === "approve_join") {
       const pending = this.pendingRequests.get(payload.requestId);
       if (pending && pending.socket?.readyState === WebSocket.OPEN) {
         pending.socket.send(JSON.stringify({ type: "join_approved", name: pending.name }));
@@ -111,7 +110,7 @@ export class ChatRoom extends DurableObject {
       return;
     }
 
-    if (payload.type === "decline_join" && participantId === this.adminParticipantId) {
+    if (payload.type === "decline_join") {
       const pending = this.pendingRequests.get(payload.requestId);
       if (pending && pending.socket?.readyState === WebSocket.OPEN) {
         pending.socket.send(JSON.stringify({ type: "join_declined" }));

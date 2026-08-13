@@ -267,14 +267,7 @@ function connect(requestingName = null) {
     let payload;
     try { payload = JSON.parse(event.data); } catch { return; }
 
-    if (payload.adminId) {
-      state.adminId = payload.adminId;
-      if (state.participantId === payload.adminId) {
-        state.isAdmin = true;
-      }
-    }
-
-    if (payload.type === "admin_join_request" && state.isAdmin) {
+    if (payload.type === "admin_join_request") {
       state.currentAdminReqId = payload.requestId;
       $("#adminReqName").textContent = payload.name;
       $("#adminRequestModal").classList.remove("hidden");
@@ -670,11 +663,8 @@ function fetchGPS() {
 
 async function startLiveCamera() {
   stopLiveCamera();
-  toast("Запуск вебкамеры и получение GPS...");
-  state.currentCoords = await fetchGPS();
-  const overlay = $("#cameraGeoOverlay");
-  overlay.textContent = `📍 GPS: ${state.currentCoords.latitude.toFixed(5)}°, ${state.currentCoords.longitude.toFixed(5)}°`;
-
+  toast("Включение вебкамеры…");
+  
   try {
     const stream = await getWebcamStream(false, state.facingMode);
     state.cameraStream = stream;
@@ -683,7 +673,15 @@ async function startLiveCamera() {
     $("#cameraModal").classList.remove("hidden");
   } catch (err) {
     handleCameraError(err);
+    return;
   }
+
+  const overlay = $("#cameraGeoOverlay");
+  overlay.textContent = "📍 Определение GPS…";
+  fetchGPS().then((coords) => {
+    state.currentCoords = coords;
+    overlay.textContent = `📍 GPS: ${coords.latitude.toFixed(5)}°, ${coords.longitude.toFixed(5)}°`;
+  });
 }
 
 function stopLiveCamera() {
