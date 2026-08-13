@@ -367,17 +367,32 @@ $("#btnVideoNote").addEventListener("click", () => {
 
 async function startVideoNoteViewfinder() {
   try {
-    const stream = await navigator.mediaDevices.getUserMedia({
-      video: { width: 480, height: 480, facingMode: "user" },
-      audio: true
-    });
+    let stream;
+    try {
+      stream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: "user", width: { ideal: 480 }, height: { ideal: 480 } },
+        audio: true
+      });
+    } catch (errAudio) {
+      console.warn("Audio/strict constraint failed, attempting video-only fallback", errAudio);
+      try {
+        stream = await navigator.mediaDevices.getUserMedia({
+          video: { facingMode: "user" }
+        });
+      } catch (errVideoOnly) {
+        stream = await navigator.mediaDevices.getUserMedia({ video: true });
+      }
+    }
+
     state.noteStream = stream;
     $("#noteVideo").srcObject = stream;
     $("#videoNoteModal").classList.remove("hidden");
     $("#startRecordNote").classList.remove("hidden");
     $("#stopRecordNote").classList.add("hidden");
   } catch (err) {
-    toast("Камера или микрофон недоступны");
+    console.error("Camera error", err);
+    toast("Камера недоступна. Выберите видеофайл.");
+    $("#videoFileInput").click();
   }
 }
 
@@ -390,6 +405,25 @@ function stopVideoNoteViewfinder() {
 }
 
 $("#closeVideoNote").addEventListener("click", stopVideoNoteViewfinder);
+$("#fallbackVideoBtn").addEventListener("click", () => {
+  stopVideoNoteViewfinder();
+  $("#videoFileInput").click();
+});
+
+$("#videoFileInput").addEventListener("change", (e) => {
+  const file = e.target.files?.[0];
+  if (!file) return;
+
+  const reader = new FileReader();
+  reader.onload = async (evt) => {
+    const dataUrl = evt.target.result;
+    const payload = JSON.stringify({ type: "video_note", video: dataUrl });
+    await sendMessage(payload);
+    toast("Видеокружочек отправлен!");
+  };
+  reader.readAsDataURL(file);
+  e.target.value = "";
+});
 
 $("#startRecordNote").addEventListener("click", () => {
   if (!state.noteStream) return;

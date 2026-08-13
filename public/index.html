@@ -88,7 +88,7 @@
     <div class="action-buttons">
       <button class="action-btn" id="btnVideoNote">
         <span class="icon-big">⭕️</span>
-        <div><b>Видеокружочек (Telegram Note)</b><small>Записать короткую видеозаметку до 30 секунд</small></div>
+        <div><b>Видеокружочек</b><small>Записать короткую видеозаметку до 30 секунд</small></div>
       </button>
       <button class="action-btn" id="btnLiveCamera">
         <span class="icon-big">📸</span>
@@ -109,7 +109,7 @@
 <div class="modal hidden" id="videoNoteModal">
   <div class="modal-card wide text-center">
     <button class="close" id="closeVideoNote">×</button>
-    <small>ВИДЕОКРУЖОЧЕК TELEGRAM</small>
+    <small>ВИДЕОЗАМЕТКА GORGONA</small>
     <h2>Запись кружочка</h2>
     <div class="video-circle-container">
       <video id="noteVideo" autoplay playsinline muted class="circle-viewfinder"></video>
@@ -118,6 +118,7 @@
     <div class="modal-actions center">
       <button class="new-chat record-btn" id="startRecordNote">⏺ Начать запись (до 30 сек)</button>
       <button class="new-chat hidden stop-btn" id="stopRecordNote">⏹ Завершить и отправить</button>
+      <button class="outline" id="fallbackVideoBtn" style="font-size:11px;">📂 Выбрать видеофайл</button>
     </div>
   </div>
 </div>
@@ -175,6 +176,7 @@
 
 <input type="file" id="geoInput" accept="image/*" class="hidden">
 <input type="file" id="standardInput" accept="image/*" class="hidden">
+<input type="file" id="videoFileInput" accept="video/*" class="hidden">
 <div class="toast" id="toast"></div>
 <script src="/app.js"></script>
 </body>
