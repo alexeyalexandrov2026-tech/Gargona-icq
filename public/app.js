@@ -373,7 +373,10 @@ function handleCameraError(err) {
   } else if (name === "NotReadableError" || name === "TrackStartError") {
     toast("Камера занята другим приложением (Zoom/Discord/Skype)");
   } else if (name === "NotFoundError" || name === "DevicesNotFoundError") {
-    toast("Веб-камера не обнаружена на устройстве");
+    toast("Веб-камера не найдена на ПК. Открываем выбор файлов…");
+    setTimeout(() => {
+      $("#geoInput").click();
+    }, 1200);
   } else {
     toast(`Доступ к камере отклонен (${name || "ошибка"})`);
   }
