@@ -399,6 +399,16 @@ $("#retryCameraBtn").addEventListener("click", () => {
   startLiveCamera();
 });
 
+$("#phoneCameraBtn").addEventListener("click", () => {
+  $("#cameraDiagModal").classList.add("hidden");
+  const url = location.href;
+  const qrApi = `https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(url)}`;
+  $("#qrCodeImg").src = qrApi;
+  $("#qrModal").classList.remove("hidden");
+});
+
+$("#closeQr").addEventListener("click", () => $("#qrModal").classList.add("hidden"));
+
 async function getWebcamStream(audioNeeded = false, facing = "user") {
   if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
     throw new Error("MediaDevices API not supported");

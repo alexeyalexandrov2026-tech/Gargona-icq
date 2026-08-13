@@ -182,19 +182,33 @@
     <div style="background:#111;border:1px solid #333;border-radius:10px;padding:12px;font-size:11px;color:#eee;margin:12px 0;">
       <p style="margin:0 0 6px;color:var(--yellow)"><b id="diagErrorTitle">Ошибка доступа</b></p>
       <div id="diagErrorDetail" style="font-family:monospace;color:#ccc;margin-bottom:8px;">NotReadableError / NotFoundError</div>
-      <div id="diagDeviceCount" style="color:#aaa;">Найдено видеоустройств: проверка…</div>
+      <div id="diagDeviceCount" style="color:#aaa;">Найдено видеоустройств: 0</div>
     </div>
     <p style="font-size:11px;color:#aaa;line-height:1.5;">
-      <b>Как включить камеру на ноутбуке:</b><br>
-      1. Проверьте физическую шторку над объективом веб-камеры.<br>
-      2. Нажмите клавишу включения камеры на клавиатуре (Fn + F10 или Fn + F6).<br>
-      3. В Windows: Параметры ➔ Конфиденциальность ➔ Камера ➔ Разрешить доступ.<br>
-      4. В браузере: Нажмите 🔒 слева от адреса сайта и выберите <b>Разрешить камеру</b>.
+      <b>Как разблокировать камеру на ПК:</b><br>
+      1. Нажмите комбинацию клавиш <b>Fn + F10</b> (или Fn + F6 / Fn + F7) для включения физической вебкамеры.<br>
+      2. Проверьте микро-шторку над экраном.<br>
+      3. В Windows: Параметры ➔ Конфиденциальность ➔ Камера ➔ Разрешить доступ браузеру.<br>
+      4. Если у вас антивирус (Kaspersky/ESET) — разрешите доступ к веб-камере.
     </p>
-    <div class="modal-actions space-between">
+    <div class="modal-actions space-between" style="flex-wrap:wrap;gap:8px;">
+      <button class="outline" id="phoneCameraBtn">📱 Камера с телефона (QR)</button>
       <button class="outline" id="fallbackDiagFile">📂 Выбрать файл с диска</button>
       <button class="new-chat" id="retryCameraBtn">🔄 Попробовать снова</button>
     </div>
+  </div>
+</div>
+
+<div class="modal hidden" id="qrModal">
+  <div class="modal-card text-center">
+    <button class="close" id="closeQr">×</button>
+    <small>МОБИЛЬНАЯ КАМЕРА</small>
+    <h2>Откройте на телефоне</h2>
+    <p>Наведите камеру смартфона на QR-код, чтобы мгновенно сделать фото или видеозаметку:</p>
+    <div style="background:#fff;padding:12px;border-radius:12px;display:inline-block;margin:12px 0;">
+      <img id="qrCodeImg" src="" alt="QR Code" style="width:180px;height:180px;display:block;">
+    </div>
+    <p style="font-size:10px;color:var(--muted);">Снимок с телефона сразу появится в вашем чате на ноутбуке!</p>
   </div>
 </div>
 
