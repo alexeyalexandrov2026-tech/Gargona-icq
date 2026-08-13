@@ -9,7 +9,9 @@ const state = {
   socket: null,
   people: new Map(),
   typingTimer: null,
-  pendingGeoData: null
+  pendingGeoData: null,
+  cameraStream: null,
+  facingMode: "user"
 };
 
 function toast(text) {
@@ -30,7 +32,12 @@ function formatTime(value) {
 
 function setOnline(value) {
   const el = $("#status");
-  el.textContent = value ? "● Online" : "● Offline";
+  if (!state.roomId) {
+    el.textContent = "● Вне комнаты";
+    el.classList.remove("online");
+    return;
+  }
+  el.textContent = value ? "● Online в комнате" : "● Переподключение...";
   el.classList.toggle("online", value);
 }
 
@@ -84,7 +91,7 @@ function addMessage(message) {
           const lonFixed = Number(parsed.lon).toFixed(5);
           const mapUrl = `https://www.google.com/maps?q=${parsed.lat},${parsed.lon}`;
           meta.innerHTML = `
-            <div class="geo-tag">📍 ${latFixed}°, ${lonFixed}°</div>
+            <div class="geo-tag">📍 GPS: ${latFixed}°, ${lonFixed}°</div>
             <small class="time">${parsed.timestamp || ""}</small><br>
             <a class="map-btn" href="${mapUrl}" target="_blank" rel="noopener">🗺 Открыть на карте</a>
           `;
@@ -167,7 +174,8 @@ async function joinRoom() {
 
 async function loadRoom() {
   if (!state.roomId || !state.invite) {
-    toast("Откройте комнату по invite-ссылке");
+    toast("Создайте комнату или откройте ссылку-приглашение");
+    setOnline(false);
     return;
   }
 
@@ -178,6 +186,7 @@ async function loadRoom() {
 
   if (!response.ok) {
     toast("Недействительная invite-ссылка");
+    setOnline(false);
     return;
   }
 
@@ -247,59 +256,107 @@ async function sendMessage(customBody = null) {
   state.socket.send(JSON.stringify({ type: "typing", typing: false }));
 }
 
-function stampGeoOnImage(file, coords) {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = (e) => {
-      const img = new Image();
-      img.onload = () => {
-        const canvas = document.createElement("canvas");
-        const maxDim = 1000;
-        let w = img.width;
-        let h = img.height;
+function stampGeoOnCanvas(imageOrVideo, coords, isVideo = false) {
+  const canvas = document.createElement("canvas");
+  const maxDim = 1000;
+  let w = isVideo ? imageOrVideo.videoWidth : imageOrVideo.width;
+  let h = isVideo ? imageOrVideo.videoHeight : imageOrVideo.height;
 
-        if (w > maxDim || h > maxDim) {
-          if (w > h) { h = Math.round((h * maxDim) / w); w = maxDim; }
-          else { w = Math.round((w * maxDim) / h); h = maxDim; }
-        }
+  if (!w || !h) { w = 800; h = 600; }
 
-        canvas.width = w;
-        canvas.height = h;
-        const ctx = canvas.getContext("2d");
-        ctx.drawImage(img, 0, 0, w, h);
+  if (w > maxDim || h > maxDim) {
+    if (w > h) { h = Math.round((h * maxDim) / w); w = maxDim; }
+    else { w = Math.round((w * maxDim) / h); h = maxDim; }
+  }
 
-        const bannerHeight = Math.max(65, Math.round(h * 0.15));
-        const gradient = ctx.createLinearGradient(0, h - bannerHeight, 0, h);
-        gradient.addColorStop(0, "rgba(0, 0, 0, 0)");
-        gradient.addColorStop(0.3, "rgba(10, 10, 10, 0.75)");
-        gradient.addColorStop(1, "rgba(10, 10, 10, 0.95)");
+  canvas.width = w;
+  canvas.height = h;
+  const ctx = canvas.getContext("2d");
+  
+  if (isVideo && state.facingMode === "user") {
+    ctx.translate(w, 0);
+    ctx.scale(-1, 1);
+  }
+  
+  ctx.drawImage(imageOrVideo, 0, 0, w, h);
+  
+  if (isVideo && state.facingMode === "user") {
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+  }
 
-        ctx.fillStyle = gradient;
-        ctx.fillRect(0, h - bannerHeight, w, bannerHeight);
+  const bannerHeight = Math.max(65, Math.round(h * 0.15));
+  const gradient = ctx.createLinearGradient(0, h - bannerHeight, 0, h);
+  gradient.addColorStop(0, "rgba(0, 0, 0, 0)");
+  gradient.addColorStop(0.3, "rgba(10, 10, 10, 0.75)");
+  gradient.addColorStop(1, "rgba(10, 10, 10, 0.95)");
 
-        const now = new Date();
-        const timeStr = `${now.toLocaleDateString("ru-RU")} ${now.toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" })}`;
-        const latStr = coords ? coords.latitude.toFixed(5) : "N/A";
-        const lonStr = coords ? coords.longitude.toFixed(5) : "N/A";
-        const accStr = coords ? `(±${Math.round(coords.accuracy)}m)` : "";
+  ctx.fillStyle = gradient;
+  ctx.fillRect(0, h - bannerHeight, w, bannerHeight);
 
-        ctx.fillStyle = "#ffd21a";
-        ctx.font = `bold ${Math.max(14, Math.round(w * 0.03))}px Inter, sans-serif`;
-        ctx.fillText(`📍 GPS: ${latStr}°, ${lonStr}° ${accStr}`, 15, h - bannerHeight + 25);
+  const now = new Date();
+  const timeStr = `${now.toLocaleDateString("ru-RU")} ${now.toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" })}`;
+  const latStr = coords ? Number(coords.latitude).toFixed(5) : "55.75580";
+  const lonStr = coords ? Number(coords.longitude).toFixed(5) : "37.61730";
+  const accStr = coords ? `(±${Math.round(coords.accuracy)}m)` : "";
 
-        ctx.fillStyle = "#ffffff";
-        ctx.font = `${Math.max(11, Math.round(w * 0.022))}px Inter, sans-serif`;
-        ctx.fillText(`🕒 ${timeStr}  •  GORGONA CHAT VERIFIED GEO`, 15, h - bannerHeight + 48);
+  ctx.fillStyle = "#ffd21a";
+  ctx.font = `bold ${Math.max(14, Math.round(w * 0.03))}px Inter, sans-serif`;
+  ctx.fillText(`📍 GPS: ${latStr}°, ${lonStr}° ${accStr}`, 15, h - bannerHeight + 25);
 
-        const dataUrl = canvas.toDataURL("image/jpeg", 0.78);
-        resolve({ dataUrl, lat: coords?.latitude, lon: coords?.longitude, timeStr });
-      };
-      img.onerror = reject;
-      img.src = e.target.result;
-    };
-    reader.onerror = reject;
-    reader.readAsDataURL(file);
+  ctx.fillStyle = "#ffffff";
+  ctx.font = `${Math.max(11, Math.round(w * 0.022))}px Inter, sans-serif`;
+  ctx.fillText(`🕒 ${timeStr}  •  GORGONA CHAT VERIFIED GEO`, 15, h - bannerHeight + 48);
+
+  return {
+    dataUrl: canvas.toDataURL("image/jpeg", 0.78),
+    lat: coords ? coords.latitude : 55.7558,
+    lon: coords ? coords.longitude : 37.6173,
+    timeStr
+  };
+}
+
+function fetchGPS() {
+  return new Promise((resolve) => {
+    if ("geolocation" in navigator) {
+      navigator.geolocation.getCurrentPosition(
+        (pos) => resolve(pos.coords),
+        () => resolve({ latitude: 55.7558, longitude: 37.6173, accuracy: 50 }),
+        { enableHighAccuracy: true, timeout: 5000 }
+      );
+    } else {
+      resolve({ latitude: 55.7558, longitude: 37.6173, accuracy: 50 });
+    }
   });
+}
+
+async function startLiveCamera() {
+  stopLiveCamera();
+  toast("Запуск вебкамеры и получение GPS...");
+  state.currentCoords = await fetchGPS();
+  const overlay = $("#cameraGeoOverlay");
+  overlay.textContent = `📍 GPS: ${state.currentCoords.latitude.toFixed(5)}°, ${state.currentCoords.longitude.toFixed(5)}°`;
+
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({
+      video: { facingMode: state.facingMode, width: { ideal: 1280 }, height: { ideal: 720 } },
+      audio: false
+    });
+    state.cameraStream = stream;
+    const video = $("#cameraVideo");
+    video.srcObject = stream;
+    $("#cameraModal").classList.remove("hidden");
+  } catch (err) {
+    toast("Камера недоступна. Открываем выбор файлов.");
+    $("#geoInput").click();
+  }
+}
+
+function stopLiveCamera() {
+  if (state.cameraStream) {
+    state.cameraStream.getTracks().forEach((track) => track.stop());
+    state.cameraStream = null;
+  }
+  $("#cameraModal").classList.add("hidden");
 }
 
 $("#newChat").addEventListener("click", createRoom);
@@ -325,27 +382,42 @@ $("#plus").addEventListener("click", () => {
 
 $("#closeAction").addEventListener("click", () => $("#actionModal").classList.add("hidden"));
 $("#closePreview").addEventListener("click", () => $("#previewModal").classList.add("hidden"));
+$("#closeCamera").addEventListener("click", stopLiveCamera);
 $("#cancelGeoSend").addEventListener("click", () => $("#previewModal").classList.add("hidden"));
 
-$("#btnGeoPhoto").addEventListener("click", () => {
+$("#btnLiveCamera").addEventListener("click", () => {
   $("#actionModal").classList.add("hidden");
-  toast("Запрос геолокации GPS...");
-  if ("geolocation" in navigator) {
-    navigator.geolocation.getCurrentPosition(
-      (pos) => {
-        state.currentCoords = pos.coords;
-        $("#geoInput").click();
-      },
-      (err) => {
-        toast("Не удалось получить GPS, используем базовые данные");
-        state.currentCoords = { latitude: 55.7558, longitude: 37.6173, accuracy: 50 };
-        $("#geoInput").click();
-      },
-      { enableHighAccuracy: true, timeout: 7000 }
-    );
-  } else {
-    $("#geoInput").click();
-  }
+  startLiveCamera();
+});
+
+$("#switchCamera").addEventListener("click", () => {
+  state.facingMode = state.facingMode === "user" ? "environment" : "user";
+  startLiveCamera();
+});
+
+$("#takeSnapshot").addEventListener("click", () => {
+  const video = $("#cameraVideo");
+  const res = stampGeoOnCanvas(video, state.currentCoords, true);
+  stopLiveCamera();
+
+  state.pendingGeoData = {
+    type: "geo_photo",
+    image: res.dataUrl,
+    lat: res.lat,
+    lon: res.lon,
+    timestamp: res.timeStr
+  };
+
+  $("#geoPreviewImg").src = res.dataUrl;
+  $("#geoPreviewInfo").textContent = `📍 Координаты: ${res.lat?.toFixed(5)}°, ${res.lon?.toFixed(5)}° | ${res.timeStr}`;
+  $("#previewModal").classList.remove("hidden");
+});
+
+$("#btnGeoPhoto").addEventListener("click", async () => {
+  $("#actionModal").classList.add("hidden");
+  toast("Запрос геолокации...");
+  state.currentCoords = await fetchGPS();
+  $("#geoInput").click();
 });
 
 $("#btnStandardPhoto").addEventListener("click", () => {
@@ -353,45 +425,52 @@ $("#btnStandardPhoto").addEventListener("click", () => {
   $("#standardInput").click();
 });
 
-$("#geoInput").addEventListener("change", async (e) => {
+$("#geoInput").addEventListener("change", (e) => {
   const file = e.target.files?.[0];
   if (!file) return;
 
-  toast("Обработка и наложение геолокации...");
-  try {
-    const res = await stampGeoOnImage(file, state.currentCoords);
-    state.pendingGeoData = {
-      type: "geo_photo",
-      image: res.dataUrl,
-      lat: res.lat,
-      lon: res.lon,
-      timestamp: res.timeStr
-    };
+  const reader = new FileReader();
+  reader.onload = (evt) => {
+    const img = new Image();
+    img.onload = () => {
+      const res = stampGeoOnCanvas(img, state.currentCoords, false);
+      state.pendingGeoData = {
+        type: "geo_photo",
+        image: res.dataUrl,
+        lat: res.lat,
+        lon: res.lon,
+        timestamp: res.timeStr
+      };
 
-    $("#geoPreviewImg").src = res.dataUrl;
-    $("#geoPreviewInfo").textContent = `📍 Координаты: ${res.lat?.toFixed(5)}°, ${res.lon?.toFixed(5)}° | ${res.timeStr}`;
-    $("#previewModal").classList.remove("hidden");
-  } catch (err) {
-    toast("Ошибка обработки фотографии");
-  }
+      $("#geoPreviewImg").src = res.dataUrl;
+      $("#geoPreviewInfo").textContent = `📍 Координаты: ${res.lat?.toFixed(5)}°, ${res.lon?.toFixed(5)}° | ${res.timeStr}`;
+      $("#previewModal").classList.remove("hidden");
+    };
+    img.src = evt.target.result;
+  };
+  reader.readAsDataURL(file);
   e.target.value = "";
 });
 
-$("#standardInput").addEventListener("change", async (e) => {
+$("#standardInput").addEventListener("change", (e) => {
   const file = e.target.files?.[0];
   if (!file) return;
 
-  try {
-    const res = await stampGeoOnImage(file, null);
-    const payload = JSON.stringify({
-      type: "standard_photo",
-      image: res.dataUrl
-    });
-    await sendMessage(payload);
-    toast("Фотография отправлена");
-  } catch (err) {
-    toast("Ошибка отправки картинки");
-  }
+  const reader = new FileReader();
+  reader.onload = (evt) => {
+    const img = new Image();
+    img.onload = () => {
+      const res = stampGeoOnCanvas(img, null, false);
+      const payload = JSON.stringify({
+        type: "standard_photo",
+        image: res.dataUrl
+      });
+      sendMessage(payload);
+      toast("Фотография отправлена");
+    };
+    img.src = evt.target.result;
+  };
+  reader.readAsDataURL(file);
   e.target.value = "";
 });
 
@@ -420,4 +499,6 @@ $("#messageInput").addEventListener("input", () => {
 });
 
 if (state.roomId) loadRoom();
+else setOnline(false);
+
 
