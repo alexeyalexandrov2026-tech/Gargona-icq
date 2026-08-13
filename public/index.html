@@ -54,6 +54,43 @@
     <button class="new-chat full" id="join">Продолжить</button>
   </div>
 </div>
+
+<div class="modal hidden" id="actionModal">
+  <div class="modal-card">
+    <button class="close" id="closeAction">×</button>
+    <small>МЕДИА-МОДУЛЬ</small>
+    <h2>Выберите действие</h2>
+    <div class="action-buttons">
+      <button class="action-btn" id="btnGeoPhoto">
+        <span class="icon-big">📸</span>
+        <div><b>Фото с геолокацией</b><small>Автоматический штамп GPS и координат на фото</small></div>
+      </button>
+      <button class="action-btn" id="btnStandardPhoto">
+        <span class="icon-big">🖼</span>
+        <div><b>Обычное фото</b><small>Отправить картинку без штампа координат</small></div>
+      </button>
+    </div>
+  </div>
+</div>
+
+<div class="modal hidden" id="previewModal">
+  <div class="modal-card wide">
+    <button class="close" id="closePreview">×</button>
+    <small>ПОДТВЕРЖДЕНИЕ ОТПРАВКИ</small>
+    <h2>Фото с геолокацией</h2>
+    <div class="geo-preview-container">
+      <img id="geoPreviewImg" src="" alt="Geo Photo Preview">
+      <div class="geo-preview-info" id="geoPreviewInfo"></div>
+    </div>
+    <div class="modal-actions">
+      <button class="outline" id="cancelGeoSend">Отмена</button>
+      <button class="new-chat" id="sendGeoPhoto">➤ Отправить в чат</button>
+    </div>
+  </div>
+</div>
+
+<input type="file" id="geoInput" accept="image/*" capture="environment" class="hidden">
+<input type="file" id="standardInput" accept="image/*" class="hidden">
 <div class="toast" id="toast"></div>
 <script src="/app.js"></script>
 </body>

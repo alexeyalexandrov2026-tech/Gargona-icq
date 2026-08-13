@@ -8,7 +8,8 @@ const state = {
   participantName: localStorage.getItem("gorgona.name"),
   socket: null,
   people: new Map(),
-  typingTimer: null
+  typingTimer: null,
+  pendingGeoData: null
 };
 
 function toast(text) {
@@ -56,7 +57,51 @@ function addMessage(message) {
   item.className = "message" + (message.participant_id === state.participantId ? " mine" : "");
   item.innerHTML = `<div class="meta"></div><div class="bubble"></div><div class="time"></div>`;
   item.querySelector(".meta").textContent = message.participant_id === state.participantId ? "Вы" : (message.name || "Участник");
-  item.querySelector(".bubble").textContent = message.body;
+  
+  const bubble = item.querySelector(".bubble");
+  let isMedia = false;
+
+  try {
+    if (message.body.startsWith("{") && message.body.endsWith("}")) {
+      const parsed = JSON.parse(message.body);
+      if (parsed.type === "geo_photo" || parsed.type === "standard_photo") {
+        isMedia = true;
+        bubble.replaceChildren();
+        const card = document.createElement("div");
+        card.className = "chat-photo-card";
+
+        const img = document.createElement("img");
+        img.className = "chat-photo-img";
+        img.src = parsed.image;
+        img.alt = "Chat Photo";
+        img.addEventListener("click", () => window.open(parsed.image, "_blank"));
+        card.appendChild(img);
+
+        if (parsed.type === "geo_photo" && parsed.lat && parsed.lon) {
+          const meta = document.createElement("div");
+          meta.className = "chat-photo-meta";
+          const latFixed = Number(parsed.lat).toFixed(5);
+          const lonFixed = Number(parsed.lon).toFixed(5);
+          const mapUrl = `https://www.google.com/maps?q=${parsed.lat},${parsed.lon}`;
+          meta.innerHTML = `
+            <div class="geo-tag">📍 ${latFixed}°, ${lonFixed}°</div>
+            <small class="time">${parsed.timestamp || ""}</small><br>
+            <a class="map-btn" href="${mapUrl}" target="_blank" rel="noopener">🗺 Открыть на карте</a>
+          `;
+          card.appendChild(meta);
+        }
+
+        bubble.appendChild(card);
+      }
+    }
+  } catch (e) {
+    isMedia = false;
+  }
+
+  if (!isMedia) {
+    bubble.textContent = message.body;
+  }
+
   item.querySelector(".time").textContent = formatTime(message.created_at);
   $("#messages").appendChild(item);
   $("#messages").scrollTop = $("#messages").scrollHeight;
@@ -191,15 +236,70 @@ function connect() {
   });
 }
 
-async function sendMessage() {
+async function sendMessage(customBody = null) {
   const input = $("#messageInput");
-  const body = input.value.trim();
+  const body = customBody || input.value.trim();
 
   if (!body || !state.socket || state.socket.readyState !== WebSocket.OPEN) return;
 
   state.socket.send(JSON.stringify({ type: "message", body }));
-  input.value = "";
+  if (!customBody) input.value = "";
   state.socket.send(JSON.stringify({ type: "typing", typing: false }));
+}
+
+function stampGeoOnImage(file, coords) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      const img = new Image();
+      img.onload = () => {
+        const canvas = document.createElement("canvas");
+        const maxDim = 1000;
+        let w = img.width;
+        let h = img.height;
+
+        if (w > maxDim || h > maxDim) {
+          if (w > h) { h = Math.round((h * maxDim) / w); w = maxDim; }
+          else { w = Math.round((w * maxDim) / h); h = maxDim; }
+        }
+
+        canvas.width = w;
+        canvas.height = h;
+        const ctx = canvas.getContext("2d");
+        ctx.drawImage(img, 0, 0, w, h);
+
+        const bannerHeight = Math.max(65, Math.round(h * 0.15));
+        const gradient = ctx.createLinearGradient(0, h - bannerHeight, 0, h);
+        gradient.addColorStop(0, "rgba(0, 0, 0, 0)");
+        gradient.addColorStop(0.3, "rgba(10, 10, 10, 0.75)");
+        gradient.addColorStop(1, "rgba(10, 10, 10, 0.95)");
+
+        ctx.fillStyle = gradient;
+        ctx.fillRect(0, h - bannerHeight, w, bannerHeight);
+
+        const now = new Date();
+        const timeStr = `${now.toLocaleDateString("ru-RU")} ${now.toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" })}`;
+        const latStr = coords ? coords.latitude.toFixed(5) : "N/A";
+        const lonStr = coords ? coords.longitude.toFixed(5) : "N/A";
+        const accStr = coords ? `(±${Math.round(coords.accuracy)}m)` : "";
+
+        ctx.fillStyle = "#ffd21a";
+        ctx.font = `bold ${Math.max(14, Math.round(w * 0.03))}px Inter, sans-serif`;
+        ctx.fillText(`📍 GPS: ${latStr}°, ${lonStr}° ${accStr}`, 15, h - bannerHeight + 25);
+
+        ctx.fillStyle = "#ffffff";
+        ctx.font = `${Math.max(11, Math.round(w * 0.022))}px Inter, sans-serif`;
+        ctx.fillText(`🕒 ${timeStr}  •  GORGONA CHAT VERIFIED GEO`, 15, h - bannerHeight + 48);
+
+        const dataUrl = canvas.toDataURL("image/jpeg", 0.78);
+        resolve({ dataUrl, lat: coords?.latitude, lon: coords?.longitude, timeStr });
+      };
+      img.onerror = reject;
+      img.src = e.target.result;
+    };
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  });
 }
 
 $("#newChat").addEventListener("click", createRoom);
@@ -219,7 +319,89 @@ $("#copyInvite").addEventListener("click", async () => {
   toast("Ссылка приглашения скопирована");
 });
 
-$("#plus").addEventListener("click", () => toast("Медиа-модуль подключим после базового realtime-теста"));
+$("#plus").addEventListener("click", () => {
+  $("#actionModal").classList.remove("hidden");
+});
+
+$("#closeAction").addEventListener("click", () => $("#actionModal").classList.add("hidden"));
+$("#closePreview").addEventListener("click", () => $("#previewModal").classList.add("hidden"));
+$("#cancelGeoSend").addEventListener("click", () => $("#previewModal").classList.add("hidden"));
+
+$("#btnGeoPhoto").addEventListener("click", () => {
+  $("#actionModal").classList.add("hidden");
+  toast("Запрос геолокации GPS...");
+  if ("geolocation" in navigator) {
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        state.currentCoords = pos.coords;
+        $("#geoInput").click();
+      },
+      (err) => {
+        toast("Не удалось получить GPS, используем базовые данные");
+        state.currentCoords = { latitude: 55.7558, longitude: 37.6173, accuracy: 50 };
+        $("#geoInput").click();
+      },
+      { enableHighAccuracy: true, timeout: 7000 }
+    );
+  } else {
+    $("#geoInput").click();
+  }
+});
+
+$("#btnStandardPhoto").addEventListener("click", () => {
+  $("#actionModal").classList.add("hidden");
+  $("#standardInput").click();
+});
+
+$("#geoInput").addEventListener("change", async (e) => {
+  const file = e.target.files?.[0];
+  if (!file) return;
+
+  toast("Обработка и наложение геолокации...");
+  try {
+    const res = await stampGeoOnImage(file, state.currentCoords);
+    state.pendingGeoData = {
+      type: "geo_photo",
+      image: res.dataUrl,
+      lat: res.lat,
+      lon: res.lon,
+      timestamp: res.timeStr
+    };
+
+    $("#geoPreviewImg").src = res.dataUrl;
+    $("#geoPreviewInfo").textContent = `📍 Координаты: ${res.lat?.toFixed(5)}°, ${res.lon?.toFixed(5)}° | ${res.timeStr}`;
+    $("#previewModal").classList.remove("hidden");
+  } catch (err) {
+    toast("Ошибка обработки фотографии");
+  }
+  e.target.value = "";
+});
+
+$("#standardInput").addEventListener("change", async (e) => {
+  const file = e.target.files?.[0];
+  if (!file) return;
+
+  try {
+    const res = await stampGeoOnImage(file, null);
+    const payload = JSON.stringify({
+      type: "standard_photo",
+      image: res.dataUrl
+    });
+    await sendMessage(payload);
+    toast("Фотография отправлена");
+  } catch (err) {
+    toast("Ошибка отправки картинки");
+  }
+  e.target.value = "";
+});
+
+$("#sendGeoPhoto").addEventListener("click", async () => {
+  if (!state.pendingGeoData) return;
+  $("#previewModal").classList.add("hidden");
+  await sendMessage(JSON.stringify(state.pendingGeoData));
+  toast("Фото с геолокацией отправлено!");
+  state.pendingGeoData = null;
+});
 
 $("#composer").addEventListener("submit", (event) => {
   event.preventDefault();
@@ -238,3 +420,4 @@ $("#messageInput").addEventListener("input", () => {
 });
 
 if (state.roomId) loadRoom();
+
