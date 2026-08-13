@@ -365,25 +365,37 @@ $("#btnVideoNote").addEventListener("click", () => {
   startVideoNoteViewfinder();
 });
 
+async function getWebcamStream(audioNeeded = false, facing = "user") {
+  if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+    throw new Error("MediaDevices API not supported");
+  }
+
+  try {
+    return await navigator.mediaDevices.getUserMedia({
+      video: { facingMode: facing, width: { ideal: 1280 }, height: { ideal: 720 } },
+      audio: audioNeeded
+    });
+  } catch (e1) {
+    console.warn("Attempt 1 with facingMode failed, trying generic video constraint:", e1);
+    try {
+      return await navigator.mediaDevices.getUserMedia({
+        video: true,
+        audio: audioNeeded
+      });
+    } catch (e2) {
+      console.warn("Attempt 2 with audio failed, trying video only:", e2);
+      if (audioNeeded) {
+        return await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
+      }
+      throw e2;
+    }
+  }
+}
+
 async function startVideoNoteViewfinder() {
   try {
-    let stream;
-    try {
-      stream = await navigator.mediaDevices.getUserMedia({
-        video: { facingMode: "user", width: { ideal: 480 }, height: { ideal: 480 } },
-        audio: true
-      });
-    } catch (errAudio) {
-      console.warn("Audio/strict constraint failed, attempting video-only fallback", errAudio);
-      try {
-        stream = await navigator.mediaDevices.getUserMedia({
-          video: { facingMode: "user" }
-        });
-      } catch (errVideoOnly) {
-        stream = await navigator.mediaDevices.getUserMedia({ video: true });
-      }
-    }
-
+    toast("Включение камеры…");
+    const stream = await getWebcamStream(true, "user");
     state.noteStream = stream;
     $("#noteVideo").srcObject = stream;
     $("#videoNoteModal").classList.remove("hidden");
@@ -391,8 +403,7 @@ async function startVideoNoteViewfinder() {
     $("#stopRecordNote").classList.add("hidden");
   } catch (err) {
     console.error("Camera error", err);
-    toast("Камера недоступна. Выберите видеофайл.");
-    $("#videoFileInput").click();
+    toast("Запрещен доступ к камере или вебкамера отключена");
   }
 }
 
@@ -651,17 +662,14 @@ async function startLiveCamera() {
   overlay.textContent = `📍 GPS: ${state.currentCoords.latitude.toFixed(5)}°, ${state.currentCoords.longitude.toFixed(5)}°`;
 
   try {
-    const stream = await navigator.mediaDevices.getUserMedia({
-      video: { facingMode: state.facingMode, width: { ideal: 1280 }, height: { ideal: 720 } },
-      audio: false
-    });
+    const stream = await getWebcamStream(false, state.facingMode);
     state.cameraStream = stream;
     const video = $("#cameraVideo");
     video.srcObject = stream;
     $("#cameraModal").classList.remove("hidden");
   } catch (err) {
-    toast("Камера недоступна. Открываем выбор файлов.");
-    $("#geoInput").click();
+    console.error("Live camera error", err);
+    toast("Запрещен доступ к камере или вебкамера отключена");
   }
 }
 
