@@ -3,6 +3,7 @@
   "version": "1.0.0",
   "private": true,
   "description": "Gorgona Chat — public web chat with unique invite links, Cloudflare Durable Objects and Supabase.",
+  "main": "src/index.mjs",
   "type": "module",
   "scripts": {
     "dev": "wrangler dev",
