@@ -8,6 +8,7 @@ export class ChatRoom extends DurableObject {
     this.env = env;
     this.adminParticipantId = null;
     this.pendingRequests = new Map();
+    this.participantNames = new Map();
   }
 
   async fetch(request) {
@@ -19,6 +20,9 @@ export class ChatRoom extends DurableObject {
         if (body.type === "participant_joined" && body.participant?.room_id) {
           if (!this.adminParticipantId) {
             this.adminParticipantId = body.participant.id;
+          }
+          if (body.participant?.id && body.participant?.display_name) {
+            this.participantNames.set(body.participant.id, body.participant.display_name);
           }
           this.broadcast(body.participant.room_id, {
             type: "participant_joined",
@@ -152,42 +156,47 @@ export class ChatRoom extends DurableObject {
     const body = cleanMessage(payload.body);
     if (!body) return;
 
-    let saved = null;
-    try {
-      const rows = await insert(this.env, "chat_messages", {
-        room_id: roomId,
-        participant_id: participantId,
-        body
-      });
-      saved = rows?.[0];
-    } catch (error) {
-      console.warn("Supabase message insert failed (continuing in-memory):", error);
+    if (!this.participantNames.has(participantId)) {
+      try {
+        const people = await select(
+          this.env,
+          "chat_participants",
+          `select=id,display_name&room_id=eq.${encodeURIComponent(roomId)}&id=eq.${encodeURIComponent(participantId)}&limit=1`
+        );
+        if (people?.[0]?.display_name) {
+          this.participantNames.set(participantId, people[0].display_name);
+        }
+      } catch (e) {
+        console.warn("Could not fetch participant name:", e);
+      }
     }
 
-    let personName = "Participant";
-    try {
-      const people = await select(
-        this.env,
-        "chat_participants",
-        `select=id,display_name&room_id=eq.${encodeURIComponent(roomId)}&id=eq.${encodeURIComponent(participantId)}`
-      );
-      if (people?.[0]?.display_name) {
-        personName = people[0].display_name;
-      }
-    } catch (e) {
-      console.warn("Could not fetch participant name:", e);
-    }
+    const messageId = crypto.randomUUID();
+    const createdAt = new Date().toISOString();
+    const personName = this.participantNames.get(participantId) || "Participant";
 
     this.broadcast(roomId, {
       type: "message",
       message: {
-        id: saved?.id || crypto.randomUUID(),
+        id: messageId,
         participant_id: participantId,
         name: personName,
         body: body,
-        created_at: saved?.created_at || new Date().toISOString()
+        created_at: createdAt
       }
     });
+
+    if (this.ctx.waitUntil) {
+      this.ctx.waitUntil(
+        insert(this.env, "chat_messages", {
+          room_id: roomId,
+          participant_id: participantId,
+          body
+        }).catch((err) => {
+          console.warn("Background DB message insert warning:", err);
+        })
+      );
+    }
   }
 
   async webSocketClose(ws) {
