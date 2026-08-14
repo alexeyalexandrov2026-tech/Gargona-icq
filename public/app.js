@@ -31,7 +31,7 @@ const state = {
   intentionalClose: false
 };
 
-const MAX_WS_PAYLOAD = 900 * 1024;
+const MAX_WS_PAYLOAD = 2.5 * 1024 * 1024;
 
 function toast(text) {
   const el = $("#toast");
@@ -705,7 +705,7 @@ function createPeerConnection(targetId) {
 
 function stampGeoOnCanvas(imageOrVideo, coords, isVideo = false) {
   const canvas = document.createElement("canvas");
-  const maxDim = 1000;
+  const maxDim = 850;
   let w = isVideo ? imageOrVideo.videoWidth : imageOrVideo.width;
   let h = isVideo ? imageOrVideo.videoHeight : imageOrVideo.height;
 
@@ -755,7 +755,7 @@ function stampGeoOnCanvas(imageOrVideo, coords, isVideo = false) {
   ctx.fillText(`🕒 ${timeStr}  •  GORGONA CHAT VERIFIED GEO`, 15, h - bannerHeight + 48);
 
   return {
-    dataUrl: canvas.toDataURL("image/jpeg", 0.78),
+    dataUrl: canvas.toDataURL("image/jpeg", 0.72),
     lat: coords ? coords.latitude : 55.7558,
     lon: coords ? coords.longitude : 37.6173,
     timeStr

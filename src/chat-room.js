@@ -152,36 +152,42 @@ export class ChatRoom extends DurableObject {
     const body = cleanMessage(payload.body);
     if (!body) return;
 
+    let saved = null;
     try {
       const rows = await insert(this.env, "chat_messages", {
         room_id: roomId,
         participant_id: participantId,
         body
       });
-      const saved = rows?.[0];
-      if (!saved) return;
+      saved = rows?.[0];
+    } catch (error) {
+      console.warn("Supabase message insert failed (continuing in-memory):", error);
+    }
 
+    let personName = "Participant";
+    try {
       const people = await select(
         this.env,
         "chat_participants",
         `select=id,display_name&room_id=eq.${encodeURIComponent(roomId)}&id=eq.${encodeURIComponent(participantId)}`
       );
-      const person = people?.[0];
-
-      this.broadcast(roomId, {
-        type: "message",
-        message: {
-          id: saved.id,
-          participant_id: saved.participant_id,
-          name: person?.display_name || "Participant",
-          body: saved.body,
-          created_at: saved.created_at
-        }
-      });
-    } catch (error) {
-      console.error("message persistence failed", error);
-      ws.send(JSON.stringify({ type: "error", message: "Message could not be saved." }));
+      if (people?.[0]?.display_name) {
+        personName = people[0].display_name;
+      }
+    } catch (e) {
+      console.warn("Could not fetch participant name:", e);
     }
+
+    this.broadcast(roomId, {
+      type: "message",
+      message: {
+        id: saved?.id || crypto.randomUUID(),
+        participant_id: participantId,
+        name: personName,
+        body: body,
+        created_at: saved?.created_at || new Date().toISOString()
+      }
+    });
   }
 
   async webSocketClose(ws) {
