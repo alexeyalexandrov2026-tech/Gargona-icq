@@ -41,7 +41,9 @@ function pairingExpiredPage() {
 </body></html>`;
 }
 
-async function api(request, env, url) {
+// Exported for direct route testing (test/index.test.mjs); the default
+// export below is what Cloudflare actually invokes per-request.
+export async function api(request, env, url) {
   const cors = corsHeaders(request, env);
 
   if (request.method === "OPTIONS") {
