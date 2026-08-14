@@ -4,12 +4,16 @@
 
 ```bash
 npm ci
-npm run check      # wrangler types -- validates wrangler.jsonc + generates types
-npm test           # syntax check + the full unit/integration test suite
+npm run check        # wrangler types -- validates wrangler.jsonc + generates types
+npm test             # syntax check + the full unit/integration test suite
+npm run build:check  # wrangler deploy --dry-run -- catches bundling/binding
+                      # mistakes (missing import, wrong binding name, a
+                      # named environment silently missing bindings) before
+                      # they reach a real deploy
 ```
 
-`npm test` must pass before deploying. It does not talk to a real
-Supabase project or Cloudflare account -- it is self-contained (see
+None of these three touch a real Supabase project or Cloudflare account --
+they are fully self-contained (see
 `test/` and the "Automated tests" section below).
 
 ## 1. Supabase
