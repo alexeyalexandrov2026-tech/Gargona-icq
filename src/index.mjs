@@ -117,12 +117,14 @@ async function api(request, env, url) {
     const authorized = await roomInfo(env, roomId, invite);
     if (!authorized || !participantId) return new Response("Forbidden", { status: 403 });
 
-    const people = await select(
-      env,
-      "chat_participants",
-      `select=id&room_id=eq.${encodeURIComponent(roomId)}&id=eq.${encodeURIComponent(participantId)}&limit=1`
-    );
-    if (!people?.[0]) return new Response("Forbidden", { status: 403 });
+    if (!participantId.startsWith("pending-")) {
+      const people = await select(
+        env,
+        "chat_participants",
+        `select=id&room_id=eq.${encodeURIComponent(roomId)}&id=eq.${encodeURIComponent(participantId)}&limit=1`
+      );
+      if (!people?.[0]) return new Response("Forbidden", { status: 403 });
+    }
 
     return roomStub(env, roomId).fetch(new Request(
       `https://room/ws?roomId=${encodeURIComponent(roomId)}&participantId=${encodeURIComponent(participantId)}`,
