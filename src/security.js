@@ -18,7 +18,7 @@ export function cleanName(value) {
 }
 
 export function cleanMessage(value) {
-  return String(value || "").trim().slice(0, 2500000);
+  return String(value || "").trim().slice(0, 35000000);
 }
 
 export function json(data, status = 200, extra = {}) {

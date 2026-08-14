@@ -31,7 +31,7 @@ const state = {
   intentionalClose: false
 };
 
-const MAX_WS_PAYLOAD = 2.5 * 1024 * 1024;
+const MAX_WS_PAYLOAD = 30 * 1024 * 1024;
 
 function toast(text) {
   const el = $("#toast");
@@ -381,7 +381,7 @@ async function sendMessage(customBody = null) {
 
   const wsPayload = JSON.stringify({ type: "message", body });
   if (wsPayload.length > MAX_WS_PAYLOAD) {
-    toast("Файл слишком большой (макс ~900 КБ). Сожмите или выберите другой.");
+    toast("Файл слишком большой (максимум 30 МБ). Выберите другой.");
     return;
   }
 
