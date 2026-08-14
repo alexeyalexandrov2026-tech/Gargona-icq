@@ -138,4 +138,24 @@ describe("authenticateParticipant (BUG-003 regression: no impersonation without 
       restore();
     }
   });
+
+  test("a real participant+session from one room cannot authenticate against a different room (cross-room isolation)", async () => {
+    const OTHER_ROOM_ID = "ffffffff-0000-4000-8000-000000000099";
+    const sessionToken = "valid-session-for-room-a-only";
+    const restore = installFetchMock(async (url) => {
+      // Faithful to Postgres/PostgREST: the participant row's room_id is
+      // ROOM_ID, so a query filtered by room_id=eq.OTHER_ROOM_ID never
+      // matches it -- there is no row to authenticate against.
+      assert.match(url, /room_id=eq\./);
+      if (url.includes(`room_id=eq.${encodeURIComponent(OTHER_ROOM_ID)}`)) return jsonResponse([]);
+      return jsonResponse([{ id: PARTICIPANT_ID, display_name: "Alice", session_token_hash: await sha256(sessionToken) }]);
+    });
+    try {
+      assert.ok(await authenticateParticipant({}, ROOM_ID, PARTICIPANT_ID, sessionToken), "sanity: works for the real room");
+      const crossRoom = await authenticateParticipant({}, OTHER_ROOM_ID, PARTICIPANT_ID, sessionToken);
+      assert.equal(crossRoom, null, "the same participantId+session must not authenticate against a room it doesn't belong to");
+    } finally {
+      restore();
+    }
+  });
 });
