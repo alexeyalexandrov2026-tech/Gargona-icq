@@ -290,15 +290,23 @@ export class ChatRoom extends DurableObject {
   async handleConsumeTicket(request) {
     const { ticket } = await request.json().catch(() => ({}));
     if (!ticket) return Response.json({ ok: false });
-
     const ticketHash = await sha256(String(ticket));
-    const entry = await this.ctx.storage.get(`ticket:${ticketHash}`);
-    if (!entry || entry.used || entry.expiresAt < Date.now()) {
-      return Response.json({ ok: false });
-    }
 
-    await this.ctx.storage.delete(`ticket:${ticketHash}`);
-    return Response.json({ ok: true, name: entry.name });
+    // Durable Objects gate delivery of new events while a storage op is
+    // in flight, which already makes a lone get-then-put race-free in
+    // the common case -- but that gating is only as good as "this
+    // handler never awaits anything ungated in between", which is easy
+    // to accidentally violate later. blockConcurrencyWhile() makes the
+    // single-use invariant explicit and unconditional rather than
+    // relying on it staying true by construction.
+    return this.ctx.blockConcurrencyWhile(async () => {
+      const entry = await this.ctx.storage.get(`ticket:${ticketHash}`);
+      if (!entry || entry.used || entry.expiresAt < Date.now()) {
+        return Response.json({ ok: false });
+      }
+      await this.ctx.storage.delete(`ticket:${ticketHash}`);
+      return Response.json({ ok: true, name: entry.name });
+    });
   }
 
   // ---- QR pairing codes (see BUG-008 in the audit) --------------------
@@ -326,20 +334,22 @@ export class ChatRoom extends DurableObject {
   async handleConsumePairingCode(request) {
     const { code } = await request.json().catch(() => ({}));
     if (!code) return Response.json({ ok: false });
-
     const codeHash = await sha256(String(code));
-    const entry = await this.ctx.storage.get(`pairing:${codeHash}`);
-    if (!entry || entry.used || entry.expiresAt < Date.now()) {
-      return Response.json({ ok: false });
-    }
 
-    // Single-use, but tolerate the phone's browser prefetching/retrying
-    // the redirect by leaving a short "already used" tombstone instead of
-    // deleting outright -- delete would make a benign double-navigation
-    // fail with a confusing error.
-    entry.used = true;
-    await this.ctx.storage.put(`pairing:${codeHash}`, entry);
-    return Response.json({ ok: true, inviteToken: entry.inviteToken });
+    return this.ctx.blockConcurrencyWhile(async () => {
+      const entry = await this.ctx.storage.get(`pairing:${codeHash}`);
+      if (!entry || entry.used || entry.expiresAt < Date.now()) {
+        return Response.json({ ok: false });
+      }
+
+      // Single-use, but tolerate the phone's browser prefetching/retrying
+      // the redirect by leaving a short "already used" tombstone instead
+      // of deleting outright -- delete would make a benign double-
+      // navigation fail with a confusing error.
+      entry.used = true;
+      await this.ctx.storage.put(`pairing:${codeHash}`, entry);
+      return Response.json({ ok: true, inviteToken: entry.inviteToken });
+    });
   }
 
   // ---- WebRTC signaling ------------------------------------------------

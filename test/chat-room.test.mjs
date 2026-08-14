@@ -138,6 +138,25 @@ describe("join tickets are single-use (replay protection)", () => {
     }));
     assert.deepEqual(await res.json(), { ok: false });
   });
+
+  test("two concurrent consume attempts for the same ticket: exactly one succeeds (section 6 race scenario)", async () => {
+    const { room, ctx } = makeRoom();
+    await ctx.storage.put("adminParticipantId", ADMIN_ID);
+    const adminSocket = ctx.connectFakeSocket([`room:${ROOM_ID}`, `participant:${ADMIN_ID}`]);
+    const pendingSocket = ctx.connectFakeSocket([`room:${ROOM_ID}`, `participant:pending-race`]);
+    await room.onJoinRequest(pendingSocket, ROOM_ID, "pending-race", { name: "Racer" });
+    const requestId = adminSocket.sent.find(m => m.type === "admin_join_request").requestId;
+    await room.onApproveJoin(ROOM_ID, ADMIN_ID, { requestId });
+    const ticket = pendingSocket.sent.find(m => m.type === "join_approved").ticket;
+
+    const consume = () => room.handleConsumeTicket(new Request("https://room/consume-ticket", {
+      method: "POST", body: JSON.stringify({ ticket })
+    })).then(r => r.json());
+
+    const [a, b] = await Promise.all([consume(), consume()]);
+    const outcomes = [a.ok, b.ok].sort();
+    assert.deepEqual(outcomes, [false, true], "racing the same single-use ticket must yield exactly one success");
+  });
 });
 
 describe("QR pairing codes never carry the real invite to a third party twice (BUG-008)", () => {
