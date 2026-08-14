@@ -16,6 +16,10 @@
       {
         "name": "CHAT_ROOMS",
         "class_name": "ChatRoom"
+      },
+      {
+        "name": "RATE_LIMITER",
+        "class_name": "RateLimiter"
       }
     ]
   },
@@ -24,17 +28,45 @@
     {
       "tag": "v1",
       "new_sqlite_classes": ["ChatRoom"]
+    },
+    {
+      "tag": "v2",
+      "new_sqlite_classes": ["RateLimiter"]
+    }
+  ],
+
+  // R2 bucket for photo/video-note attachments. The bucket itself is not
+  // created by this config -- run, once, before first deploy:
+  //   npx wrangler r2 bucket create gargona-icq-media
+  // See DEPLOYMENT.md.
+  "r2_buckets": [
+    {
+      "binding": "MEDIA_BUCKET",
+      "bucket_name": "gargona-icq-media"
     }
   ],
 
   "vars": {
     "APP_NAME": "Gorgona Chat",
-    "SUPABASE_URL": "https://ctszqhhvalyqxhbfqifx.supabase.co"
-  },
-
-  "env": {
-    "production": {
-      "name": "gargona-icq"
-    }
+    "SUPABASE_URL": "https://ctszqhhvalyqxhbfqifx.supabase.co",
+    // Comma-separated extra origins (besides the Worker's own deployed
+    // origin) allowed to make cross-origin requests to /api/*. Leave
+    // empty unless another site legitimately needs to call this API.
+    "ALLOWED_ORIGINS": ""
   }
+
+  // A previous "env.production" block used to live here, pointing at the
+  // same worker name as the top level. Wrangler does NOT inherit
+  // top-level "vars"/"durable_objects"/"r2_buckets" into named
+  // environments (confirmed via `wrangler deploy --dry-run --env
+  // production`, which came back with every binding missing) -- so that
+  // block was silently broken: it deployed a Worker with none of its
+  // Durable Object bindings if anyone ever ran `wrangler deploy --env
+  // production`. The real deploy command (`npm run deploy` / `wrangler
+  // deploy`, see DEPLOYMENT.md) never passed --env, so this was inert
+  // rather than actively harmful, but it was a footgun waiting for
+  // someone to trip over. Since there was never an actual second
+  // environment (identical worker name, no differing config), removing
+  // it outright is the real fix rather than duplicating every binding
+  // into an "env.production" block and taking on that drift risk again.
 }

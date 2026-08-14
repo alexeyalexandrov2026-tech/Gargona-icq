@@ -1,16 +1,27 @@
 const $ = (s) => document.querySelector(s);
 const parts = location.pathname.split("/").filter(Boolean);
+const roomIdFromUrl = parts[0] === "c" ? parts[1] : null;
+
+// Identity is scoped per room: a browser can hold a different
+// participant identity in each room it has joined. Using a single
+// global localStorage key (the previous behaviour) meant opening a
+// second room's invite silently reused the first room's identity data.
+function storageKey(roomId, name) {
+  return `gorgona.${name}.${roomId}`;
+}
 
 const state = {
-  roomId: parts[0] === "c" ? parts[1] : null,
+  roomId: roomIdFromUrl,
   invite: new URLSearchParams(location.search).get("invite"),
-  participantId: localStorage.getItem("gorgona.participant"),
-  participantName: localStorage.getItem("gorgona.name"),
-  isAdmin: localStorage.getItem("gorgona.is_admin") === "true",
+  participantId: roomIdFromUrl ? localStorage.getItem(storageKey(roomIdFromUrl, "participant")) : null,
+  participantName: roomIdFromUrl ? localStorage.getItem(storageKey(roomIdFromUrl, "name")) : null,
+  sessionToken: roomIdFromUrl ? localStorage.getItem(storageKey(roomIdFromUrl, "session")) : null,
+  adminId: null,
   socket: null,
   people: new Map(),
   typingTimer: null,
-  pendingGeoData: null,
+  pendingGeoBlob: null,
+  pendingGeoMeta: null,
   cameraStream: null,
   facingMode: "user",
   currentAdminReqId: null,
@@ -19,7 +30,9 @@ const state = {
   noteStream: null,
   noteTimer: null,
   callStream: null,
-  peerConnections: new Map()
+  peerConnections: new Map(),
+  oldestCursor: null,
+  loadingOlder: false
 };
 
 function toast(text) {
@@ -36,6 +49,10 @@ function initials(name) {
 
 function formatTime(value) {
   return new Intl.DateTimeFormat("ru-RU", { hour:"2-digit", minute:"2-digit" }).format(new Date(value));
+}
+
+function apiErrorMessage(data, fallback) {
+  return data?.error?.message || fallback;
 }
 
 function setOnline(value) {
@@ -56,10 +73,29 @@ function renderPeople() {
   for (const person of state.people.values()) {
     const row = document.createElement("div");
     row.className = "person";
-    const isAdminBadge = person.id === state.adminId ? " <small style='color:var(--yellow)'>(Админ)</small>" : "";
-    row.innerHTML = `<div class="avatar"></div><div><b></b>${isAdminBadge}<small>Участник</small></div>`;
-    row.querySelector(".avatar").textContent = initials(person.display_name || person.name);
-    row.querySelector("b").textContent = person.display_name || person.name;
+
+    const avatar = document.createElement("div");
+    avatar.className = "avatar";
+    avatar.textContent = initials(person.display_name || person.name);
+
+    const info = document.createElement("div");
+    const nameEl = document.createElement("b");
+    nameEl.textContent = person.display_name || person.name;
+    info.appendChild(nameEl);
+
+    if (person.id === state.adminId) {
+      const badge = document.createElement("small");
+      badge.style.color = "var(--yellow)";
+      badge.textContent = " (Админ)";
+      info.appendChild(badge);
+    }
+
+    const role = document.createElement("small");
+    role.textContent = "Участник";
+    info.appendChild(role);
+
+    row.appendChild(avatar);
+    row.appendChild(info);
     root.appendChild(row);
   }
 }
@@ -68,52 +104,75 @@ function clearMessages() {
   $("#messages").replaceChildren();
 }
 
-function addMessage(message) {
+// Only ever-same-origin, server-issued paths of the exact shape the
+// media upload endpoint returns are allowed as an image/video src. This
+// is what stands between a crafted message payload and an attacker
+// choosing an arbitrary (e.g. javascript:) URL scheme.
+const MEDIA_PATH_RE = /^\/api\/media\/[0-9a-f-]{36}\/[0-9a-f-]{36}\/[0-9a-f-]{36}\.[a-z0-9]+$/i;
+
+function mediaSrc(mediaPath) {
+  if (typeof mediaPath !== "string" || !MEDIA_PATH_RE.test(mediaPath)) return null;
+  return `${mediaPath}?invite=${encodeURIComponent(state.invite || "")}`;
+}
+
+function buildMessageElement(message) {
   const item = document.createElement("article");
   item.className = "message" + (message.participant_id === state.participantId ? " mine" : "");
-  item.innerHTML = `<div class="meta"></div><div class="bubble"></div><div class="time"></div>`;
-  item.querySelector(".meta").textContent = message.participant_id === state.participantId ? "Вы" : (message.name || "Участник");
-  
-  const bubble = item.querySelector(".bubble");
-  let isMedia = false;
 
+  const meta = document.createElement("div");
+  meta.className = "meta";
+  meta.textContent = message.participant_id === state.participantId ? "Вы" : (message.name || "Участник");
+  item.appendChild(meta);
+
+  const bubble = document.createElement("div");
+  bubble.className = "bubble";
+  item.appendChild(bubble);
+
+  let isMedia = false;
   try {
     if (message.body.startsWith("{") && message.body.endsWith("}")) {
       const parsed = JSON.parse(message.body);
-      if (parsed.type === "geo_photo" || parsed.type === "standard_photo") {
+      const src = mediaSrc(parsed.mediaPath);
+
+      if (src && (parsed.type === "geo_photo" || parsed.type === "standard_photo")) {
         isMedia = true;
-        bubble.replaceChildren();
         const card = document.createElement("div");
         card.className = "chat-photo-card";
 
         const img = document.createElement("img");
         img.className = "chat-photo-img";
-        img.src = parsed.image;
+        img.src = src;
         img.alt = "Chat Photo";
-        img.addEventListener("click", () => window.open(parsed.image, "_blank"));
+        img.loading = "lazy";
+        img.addEventListener("click", () => window.open(src, "_blank", "noopener,noreferrer"));
         card.appendChild(img);
 
-        if (parsed.type === "geo_photo" && parsed.lat && parsed.lon) {
-          const meta = document.createElement("div");
-          meta.className = "chat-photo-meta";
-          const latFixed = Number(parsed.lat).toFixed(5);
-          const lonFixed = Number(parsed.lon).toFixed(5);
-          meta.innerHTML = `
-            <div class="geo-tag">📍 GPS: ${latFixed}°, ${lonFixed}°</div>
-            <small class="time">${parsed.timestamp || ""}</small>
-          `;
-          card.appendChild(meta);
+        const lat = Number(parsed.lat);
+        const lon = Number(parsed.lon);
+        if (parsed.type === "geo_photo" && Number.isFinite(lat) && Number.isFinite(lon)) {
+          const metaBox = document.createElement("div");
+          metaBox.className = "chat-photo-meta";
+
+          const geoTag = document.createElement("div");
+          geoTag.className = "geo-tag";
+          geoTag.textContent = `📍 GPS: ${lat.toFixed(5)}°, ${lon.toFixed(5)}°`;
+          metaBox.appendChild(geoTag);
+
+          const time = document.createElement("small");
+          time.className = "time";
+          time.textContent = String(parsed.timestamp || "").slice(0, 64);
+          metaBox.appendChild(time);
+
+          card.appendChild(metaBox);
         }
 
         bubble.appendChild(card);
-      } else if (parsed.type === "video_note") {
+      } else if (src && parsed.type === "video_note") {
         isMedia = true;
-        bubble.replaceChildren();
         const video = document.createElement("video");
         video.className = "chat-video-circle";
-        video.src = parsed.video;
+        video.src = src;
         video.controls = true;
-        video.autoplay = false;
         video.playsInline = true;
         bubble.appendChild(video);
       }
@@ -126,9 +185,25 @@ function addMessage(message) {
     bubble.textContent = message.body;
   }
 
-  item.querySelector(".time").textContent = formatTime(message.created_at);
-  $("#messages").appendChild(item);
-  $("#messages").scrollTop = $("#messages").scrollHeight;
+  const time = document.createElement("div");
+  time.className = "time";
+  time.textContent = formatTime(message.created_at);
+  item.appendChild(time);
+
+  return item;
+}
+
+function addMessage(message) {
+  const container = $("#messages");
+  container.appendChild(buildMessageElement(message));
+  container.scrollTop = container.scrollHeight;
+}
+
+function prependMessages(messages) {
+  const container = $("#messages");
+  const fragment = document.createDocumentFragment();
+  messages.forEach(m => fragment.appendChild(buildMessageElement(m)));
+  container.prepend(fragment);
 }
 
 function renderMessages(messages) {
@@ -145,6 +220,45 @@ function renderMessages(messages) {
   messages.forEach(addMessage);
 }
 
+function setLoadOlderVisible(visible) {
+  $("#loadOlder").classList.toggle("hidden", !visible);
+}
+
+async function loadOlderMessages() {
+  if (!state.oldestCursor || state.loadingOlder) return;
+  state.loadingOlder = true;
+  const btn = $("#loadOlder");
+  btn.disabled = true;
+  btn.textContent = "Загрузка…";
+
+  try {
+    const params = new URLSearchParams({
+      before: state.oldestCursor.beforeCreatedAt,
+      beforeId: state.oldestCursor.beforeId
+    });
+    const response = await fetch(`/api/chats/${encodeURIComponent(state.roomId)}?${params}`, {
+      headers: { Authorization: `Bearer ${state.invite}` }
+    });
+    const data = await response.json();
+    if (!response.ok) {
+      toast(apiErrorMessage(data, "Не удалось загрузить историю"));
+      return;
+    }
+
+    const container = $("#messages");
+    const previousHeight = container.scrollHeight;
+    prependMessages(data.messages);
+    container.scrollTop = container.scrollHeight - previousHeight;
+
+    state.oldestCursor = data.cursor;
+    setLoadOlderVisible(Boolean(data.hasMore));
+  } finally {
+    state.loadingOlder = false;
+    btn.disabled = false;
+    btn.textContent = "↑ Загрузить более старые сообщения";
+  }
+}
+
 async function createRoom() {
   const response = await fetch("/api/chats", {
     method: "POST",
@@ -154,12 +268,10 @@ async function createRoom() {
   const data = await response.json();
 
   if (!response.ok) {
-    toast(data.error || "Не удалось создать комнату");
+    toast(apiErrorMessage(data, "Не удалось создать комнату"));
     return;
   }
 
-  localStorage.setItem("gorgona.is_admin", "true");
-  state.isAdmin = true;
   location.href = data.url;
 }
 
@@ -176,28 +288,33 @@ async function joinRoom() {
   state.pendingName = name;
   $("#modal").classList.add("hidden");
 
-  if (state.isAdmin || state.people.size === 0) {
-    await completeJoin(name);
+  if (state.people.size === 0) {
+    // Nobody to approve an empty room's first participant -- holding the
+    // invite is already the trust boundary for that seat, same rule the
+    // server enforces in POST /participants.
+    await completeJoin(name, null);
   } else {
     $("#waitingModal").classList.remove("hidden");
     connect(name);
   }
 }
 
-async function completeJoin(name) {
+async function completeJoin(name, joinTicket) {
   const response = await fetch(`/api/chats/${encodeURIComponent(state.roomId)}/participants`, {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ name, inviteToken: state.invite })
+    body: JSON.stringify({ name, inviteToken: state.invite, joinTicket: joinTicket || undefined })
   });
   const data = await response.json();
 
-  if (!response.ok) return toast(data.error || "Не удалось войти");
+  if (!response.ok) return toast(apiErrorMessage(data, "Не удалось войти"));
 
   state.participantId = data.id;
   state.participantName = data.display_name;
-  localStorage.setItem("gorgona.participant", data.id);
-  localStorage.setItem("gorgona.name", data.display_name);
+  state.sessionToken = data.sessionToken;
+  localStorage.setItem(storageKey(state.roomId, "participant"), data.id);
+  localStorage.setItem(storageKey(state.roomId, "name"), data.display_name);
+  localStorage.setItem(storageKey(state.roomId, "session"), data.sessionToken);
 
   $("#waitingModal").classList.add("hidden");
   connect();
@@ -210,13 +327,13 @@ async function loadRoom() {
     return;
   }
 
-  const response = await fetch(
-    `/api/chats/${encodeURIComponent(state.roomId)}?invite=${encodeURIComponent(state.invite)}`
-  );
+  const response = await fetch(`/api/chats/${encodeURIComponent(state.roomId)}`, {
+    headers: { Authorization: `Bearer ${state.invite}` }
+  });
   const data = await response.json();
 
   if (!response.ok) {
-    toast("Недействительная invite-ссылка");
+    toast(apiErrorMessage(data, "Недействительная invite-ссылка"));
     setOnline(false);
     return;
   }
@@ -228,16 +345,14 @@ async function loadRoom() {
 
   state.people.clear();
   data.participants.forEach(p => state.people.set(p.id, p));
-  
-  if (data.participants.length > 0 && data.participants[0].id === state.participantId) {
-    state.isAdmin = true;
-    localStorage.setItem("gorgona.is_admin", "true");
-  }
-
   renderPeople();
   renderMessages(data.messages);
 
-  if (!state.participantId || !state.people.has(state.participantId)) openJoin();
+  state.oldestCursor = data.cursor;
+  setLoadOlderVisible(Boolean(data.hasMore));
+
+  const knownParticipant = state.participantId && state.sessionToken && state.people.has(state.participantId);
+  if (!knownParticipant) openJoin();
   else connect();
 }
 
@@ -246,12 +361,17 @@ function connect(requestingName = null) {
 
   const tempId = state.participantId || "pending-" + Math.random().toString(36).slice(2);
   const protocol = location.protocol === "https:" ? "wss:" : "ws:";
-  const url =
-    `${protocol}//${location.host}/api/rooms/${encodeURIComponent(state.roomId)}/ws` +
-    `?invite=${encodeURIComponent(state.invite)}` +
-    `&participantId=${encodeURIComponent(tempId)}`;
+  const url = `${protocol}//${location.host}/api/rooms/${encodeURIComponent(state.roomId)}/ws?participantId=${encodeURIComponent(tempId)}`;
 
-  state.socket = new WebSocket(url);
+  // Bearer credentials travel as WebSocket subprotocols rather than URL
+  // query parameters: unlike the URL, they are never written to browser
+  // history and never sent as a Referer.
+  const protocols = [`gorgona.invite.${state.invite}`];
+  if (state.participantId && state.sessionToken) {
+    protocols.push(`gorgona.session.${state.sessionToken}`);
+  }
+
+  state.socket = new WebSocket(url, protocols);
 
   state.socket.addEventListener("open", () => {
     setOnline(true);
@@ -278,13 +398,13 @@ function connect(requestingName = null) {
     if (payload.type === "join_approved") {
       $("#waitingModal").classList.add("hidden");
       toast("Администратор одобрил ваш вход!");
-      await completeJoin(payload.name || state.pendingName);
+      await completeJoin(payload.name || state.pendingName, payload.ticket);
       return;
     }
 
     if (payload.type === "auto_approved") {
       $("#waitingModal").classList.add("hidden");
-      await completeJoin(state.pendingName);
+      await completeJoin(payload.name || state.pendingName, payload.ticket);
       return;
     }
 
@@ -307,18 +427,29 @@ function connect(requestingName = null) {
       return;
     }
 
-    if (payload.type === "presence" && payload.online && payload.participantId !== state.participantId) {
-      const person = state.people.get(payload.participantId);
-      if (person) toast(`${person.display_name} подключился`);
+    if (payload.type === "participant_joined" && payload.participant) {
+      state.people.set(payload.participant.id, payload.participant);
+      if (payload.adminId) state.adminId = payload.adminId;
+      renderPeople();
+      return;
     }
 
-    if (payload.type === "webrtc_offer" && payload.targetId === state.participantId) {
+    if (payload.type === "presence") {
+      if (payload.adminId) state.adminId = payload.adminId;
+      if (payload.online && payload.participantId !== state.participantId) {
+        const person = state.people.get(payload.participantId);
+        if (person) toast(`${person.display_name} подключился`);
+      }
+      renderPeople();
+    }
+
+    if (payload.type === "webrtc_offer" && payload.senderId) {
       handleWebRTCOffer(payload.senderId, payload.data);
     }
-    if (payload.type === "webrtc_answer" && payload.targetId === state.participantId) {
+    if (payload.type === "webrtc_answer" && payload.senderId) {
       handleWebRTCAnswer(payload.senderId, payload.data);
     }
-    if (payload.type === "webrtc_ice_candidate" && payload.targetId === state.participantId) {
+    if (payload.type === "webrtc_ice_candidate" && payload.senderId) {
       handleWebRTCIce(payload.senderId, payload.data);
     }
 
@@ -337,6 +468,27 @@ async function sendMessage(customBody = null) {
   state.socket.send(JSON.stringify({ type: "typing", typing: false }));
 }
 
+// ---- media upload (R2-backed; replaces embedding base64 in messages) ----
+
+function canvasToBlob(canvas, type = "image/jpeg", quality = 0.78) {
+  return new Promise((resolve) => canvas.toBlob(resolve, type, quality));
+}
+
+async function uploadMedia(blob, contentType) {
+  const response = await fetch(`/api/chats/${encodeURIComponent(state.roomId)}/media`, {
+    method: "POST",
+    headers: {
+      "Content-Type": contentType,
+      "Authorization": `Bearer ${state.sessionToken}`,
+      "X-Participant-Id": state.participantId || ""
+    },
+    body: blob
+  });
+  const data = await response.json();
+  if (!response.ok) throw new Error(apiErrorMessage(data, "Не удалось загрузить файл"));
+  return data;
+}
+
 $("#approveJoinBtn").addEventListener("click", () => {
   if (state.currentAdminReqId && state.socket) {
     state.socket.send(JSON.stringify({ type: "approve_join", requestId: state.currentAdminReqId }));
@@ -352,6 +504,8 @@ $("#declineJoinBtn").addEventListener("click", () => {
   }
   $("#adminRequestModal").classList.add("hidden");
 });
+
+$("#loadOlder").addEventListener("click", loadOlderMessages);
 
 $("#btnVideoNote").addEventListener("click", () => {
   $("#actionModal").classList.add("hidden");
@@ -399,12 +553,26 @@ $("#retryCameraBtn").addEventListener("click", () => {
   startLiveCamera();
 });
 
-$("#phoneCameraBtn").addEventListener("click", () => {
+$("#phoneCameraBtn").addEventListener("click", async () => {
   $("#cameraDiagModal").classList.add("hidden");
-  const url = location.href;
-  const qrApi = `https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(url)}`;
-  $("#qrCodeImg").src = qrApi;
-  $("#qrModal").classList.remove("hidden");
+  try {
+    const response = await fetch(`/api/chats/${encodeURIComponent(state.roomId)}/pairing-code`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ inviteToken: state.invite })
+    });
+    const data = await response.json();
+    if (!response.ok) return toast(apiErrorMessage(data, "Не удалось создать QR-код"));
+
+    // The QR only ever encodes our own short-lived, single-use pairing
+    // URL -- never the real invite bearer token -- so the third-party
+    // rendering service never sees a working credential.
+    const qrApi = `https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(data.url)}`;
+    $("#qrCodeImg").src = qrApi;
+    $("#qrModal").classList.remove("hidden");
+  } catch (err) {
+    toast("Не удалось создать QR-код");
+  }
 });
 
 $("#closeQr").addEventListener("click", () => $("#qrModal").classList.add("hidden"));
@@ -462,18 +630,18 @@ $("#fallbackVideoBtn").addEventListener("click", () => {
   $("#videoFileInput").click();
 });
 
-$("#videoFileInput").addEventListener("change", (e) => {
+$("#videoFileInput").addEventListener("change", async (e) => {
   const file = e.target.files?.[0];
   if (!file) return;
 
-  const reader = new FileReader();
-  reader.onload = async (evt) => {
-    const dataUrl = evt.target.result;
-    const payload = JSON.stringify({ type: "video_note", video: dataUrl });
-    await sendMessage(payload);
+  try {
+    toast("Загрузка видео…");
+    const uploaded = await uploadMedia(file, file.type || "video/mp4");
+    await sendMessage(JSON.stringify({ type: "video_note", mediaPath: uploaded.mediaPath, contentType: uploaded.contentType }));
     toast("Видеокружочек отправлен!");
-  };
-  reader.readAsDataURL(file);
+  } catch (err) {
+    toast(err.message || "Не удалось отправить видео");
+  }
   e.target.value = "";
 });
 
@@ -492,15 +660,16 @@ $("#startRecordNote").addEventListener("click", () => {
 
     state.noteMediaRecorder.onstop = async () => {
       const blob = new Blob(state.noteChunks, { type: "video/webm" });
-      const reader = new FileReader();
-      reader.onload = async (evt) => {
-        const dataUrl = evt.target.result;
-        const payload = JSON.stringify({ type: "video_note", video: dataUrl });
-        await sendMessage(payload);
+      try {
+        toast("Загрузка видеокружочка…");
+        const uploaded = await uploadMedia(blob, "video/webm");
+        await sendMessage(JSON.stringify({ type: "video_note", mediaPath: uploaded.mediaPath, contentType: uploaded.contentType }));
         toast("Видеокружочек отправлен!");
+      } catch (err) {
+        toast(err.message || "Не удалось отправить видеокружочек");
+      } finally {
         stopVideoNoteViewfinder();
-      };
-      reader.readAsDataURL(blob);
+      }
     };
 
     state.noteMediaRecorder.start();
@@ -622,7 +791,9 @@ function createPeerConnection(targetId) {
   return pc;
 }
 
-function stampGeoOnCanvas(imageOrVideo, coords, isVideo = false) {
+// ---- photo capture: resize, optional GPS overlay, upload -------------
+
+function drawResizedImage(imageOrVideo, isVideo = false) {
   const canvas = document.createElement("canvas");
   const maxDim = 1000;
   let w = isVideo ? imageOrVideo.videoWidth : imageOrVideo.width;
@@ -638,67 +809,75 @@ function stampGeoOnCanvas(imageOrVideo, coords, isVideo = false) {
   canvas.width = w;
   canvas.height = h;
   const ctx = canvas.getContext("2d");
-  
+
   if (isVideo && state.facingMode === "user") {
     ctx.translate(w, 0);
     ctx.scale(-1, 1);
   }
-  
+
   ctx.drawImage(imageOrVideo, 0, 0, w, h);
-  
+
   if (isVideo && state.facingMode === "user") {
     ctx.setTransform(1, 0, 0, 1, 0, 0);
   }
 
+  return canvas;
+}
+
+// Draws the GPS/time banner. `coords` is either real geolocation
+// coordinates or null -- and null always means the banner says so in
+// plain text. It never fabricates a location (see BUG-007 in the audit:
+// this used to fall back to a hardcoded Moscow coordinate).
+function drawGeoOverlay(canvas, coords) {
+  const ctx = canvas.getContext("2d");
+  const w = canvas.width;
+  const h = canvas.height;
   const bannerHeight = Math.max(65, Math.round(h * 0.15));
+
   const gradient = ctx.createLinearGradient(0, h - bannerHeight, 0, h);
   gradient.addColorStop(0, "rgba(0, 0, 0, 0)");
   gradient.addColorStop(0.3, "rgba(10, 10, 10, 0.75)");
   gradient.addColorStop(1, "rgba(10, 10, 10, 0.95)");
-
   ctx.fillStyle = gradient;
   ctx.fillRect(0, h - bannerHeight, w, bannerHeight);
 
   const now = new Date();
   const timeStr = `${now.toLocaleDateString("ru-RU")} ${now.toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" })}`;
-  const latStr = coords ? Number(coords.latitude).toFixed(5) : "55.75580";
-  const lonStr = coords ? Number(coords.longitude).toFixed(5) : "37.61730";
-  const accStr = coords ? `(±${Math.round(coords.accuracy)}m)` : "";
 
   ctx.fillStyle = "#ffd21a";
   ctx.font = `bold ${Math.max(14, Math.round(w * 0.03))}px Inter, sans-serif`;
-  ctx.fillText(`📍 GPS: ${latStr}°, ${lonStr}° ${accStr}`, 15, h - bannerHeight + 25);
+  const gpsLine = coords
+    ? `📍 GPS: ${Number(coords.latitude).toFixed(5)}°, ${Number(coords.longitude).toFixed(5)}° (±${Math.round(coords.accuracy)}m)`
+    : "📍 GPS недоступен";
+  ctx.fillText(gpsLine, 15, h - bannerHeight + 25);
 
   ctx.fillStyle = "#ffffff";
   ctx.font = `${Math.max(11, Math.round(w * 0.022))}px Inter, sans-serif`;
-  ctx.fillText(`🕒 ${timeStr}  •  GORGONA CHAT VERIFIED GEO`, 15, h - bannerHeight + 48);
+  const caption = coords ? "GORGONA CHAT VERIFIED GEO" : "GORGONA CHAT • GPS UNAVAILABLE";
+  ctx.fillText(`🕒 ${timeStr}  •  ${caption}`, 15, h - bannerHeight + 48);
 
   return {
-    dataUrl: canvas.toDataURL("image/jpeg", 0.78),
-    lat: coords ? coords.latitude : 55.7558,
-    lon: coords ? coords.longitude : 37.6173,
+    lat: coords ? coords.latitude : null,
+    lon: coords ? coords.longitude : null,
     timeStr
   };
 }
 
 function fetchGPS() {
   return new Promise((resolve) => {
-    if ("geolocation" in navigator) {
-      navigator.geolocation.getCurrentPosition(
-        (pos) => resolve(pos.coords),
-        () => resolve({ latitude: 55.7558, longitude: 37.6173, accuracy: 50 }),
-        { enableHighAccuracy: true, timeout: 5000 }
-      );
-    } else {
-      resolve({ latitude: 55.7558, longitude: 37.6173, accuracy: 50 });
-    }
+    if (!("geolocation" in navigator)) return resolve(null);
+    navigator.geolocation.getCurrentPosition(
+      (pos) => resolve(pos.coords),
+      () => resolve(null),
+      { enableHighAccuracy: true, timeout: 5000 }
+    );
   });
 }
 
 async function startLiveCamera() {
   stopLiveCamera();
   toast("Включение вебкамеры…");
-  
+
   try {
     const stream = await getWebcamStream(false, state.facingMode);
     state.cameraStream = stream;
@@ -714,7 +893,9 @@ async function startLiveCamera() {
   overlay.textContent = "📍 Определение GPS…";
   fetchGPS().then((coords) => {
     state.currentCoords = coords;
-    overlay.textContent = `📍 GPS: ${coords.latitude.toFixed(5)}°, ${coords.longitude.toFixed(5)}°`;
+    overlay.textContent = coords
+      ? `📍 GPS: ${coords.latitude.toFixed(5)}°, ${coords.longitude.toFixed(5)}°`
+      : "📍 GPS недоступен";
   });
 }
 
@@ -750,7 +931,11 @@ $("#plus").addEventListener("click", () => {
 $("#closeAction").addEventListener("click", () => $("#actionModal").classList.add("hidden"));
 $("#closePreview").addEventListener("click", () => $("#previewModal").classList.add("hidden"));
 $("#closeCamera").addEventListener("click", stopLiveCamera);
-$("#cancelGeoSend").addEventListener("click", () => $("#previewModal").classList.add("hidden"));
+$("#cancelGeoSend").addEventListener("click", () => {
+  $("#previewModal").classList.add("hidden");
+  state.pendingGeoBlob = null;
+  state.pendingGeoMeta = null;
+});
 
 $("#btnLiveCamera").addEventListener("click", () => {
   $("#actionModal").classList.add("hidden");
@@ -762,22 +947,23 @@ $("#switchCamera").addEventListener("click", () => {
   startLiveCamera();
 });
 
-$("#takeSnapshot").addEventListener("click", () => {
+function showGeoPreview(canvas, lat, lon, timeStr) {
+  $("#geoPreviewImg").src = canvas.toDataURL("image/jpeg", 0.6);
+  $("#geoPreviewInfo").textContent = lat != null && lon != null
+    ? `📍 Координаты: ${lat.toFixed(5)}°, ${lon.toFixed(5)}° | ${timeStr}`
+    : `📍 GPS недоступен | ${timeStr}`;
+  $("#previewModal").classList.remove("hidden");
+}
+
+$("#takeSnapshot").addEventListener("click", async () => {
   const video = $("#cameraVideo");
-  const res = stampGeoOnCanvas(video, state.currentCoords, true);
+  const canvas = drawResizedImage(video, true);
+  const { lat, lon, timeStr } = drawGeoOverlay(canvas, state.currentCoords);
   stopLiveCamera();
 
-  state.pendingGeoData = {
-    type: "geo_photo",
-    image: res.dataUrl,
-    lat: res.lat,
-    lon: res.lon,
-    timestamp: res.timeStr
-  };
-
-  $("#geoPreviewImg").src = res.dataUrl;
-  $("#geoPreviewInfo").textContent = `📍 Координаты: ${res.lat?.toFixed(5)}°, ${res.lon?.toFixed(5)}° | ${res.timeStr}`;
-  $("#previewModal").classList.remove("hidden");
+  state.pendingGeoBlob = await canvasToBlob(canvas);
+  state.pendingGeoMeta = { type: "geo_photo", lat, lon, timestamp: timeStr };
+  showGeoPreview(canvas, lat, lon, timeStr);
 });
 
 $("#btnGeoPhoto").addEventListener("click", async () => {
@@ -799,19 +985,12 @@ $("#geoInput").addEventListener("change", (e) => {
   const reader = new FileReader();
   reader.onload = (evt) => {
     const img = new Image();
-    img.onload = () => {
-      const res = stampGeoOnCanvas(img, state.currentCoords, false);
-      state.pendingGeoData = {
-        type: "geo_photo",
-        image: res.dataUrl,
-        lat: res.lat,
-        lon: res.lon,
-        timestamp: res.timeStr
-      };
-
-      $("#geoPreviewImg").src = res.dataUrl;
-      $("#geoPreviewInfo").textContent = `📍 Координаты: ${res.lat?.toFixed(5)}°, ${res.lon?.toFixed(5)}° | ${res.timeStr}`;
-      $("#previewModal").classList.remove("hidden");
+    img.onload = async () => {
+      const canvas = drawResizedImage(img, false);
+      const { lat, lon, timeStr } = drawGeoOverlay(canvas, state.currentCoords);
+      state.pendingGeoBlob = await canvasToBlob(canvas);
+      state.pendingGeoMeta = { type: "geo_photo", lat, lon, timestamp: timeStr };
+      showGeoPreview(canvas, lat, lon, timeStr);
     };
     img.src = evt.target.result;
   };
@@ -826,14 +1005,20 @@ $("#standardInput").addEventListener("change", (e) => {
   const reader = new FileReader();
   reader.onload = (evt) => {
     const img = new Image();
-    img.onload = () => {
-      const res = stampGeoOnCanvas(img, null, false);
-      const payload = JSON.stringify({
-        type: "standard_photo",
-        image: res.dataUrl
-      });
-      sendMessage(payload);
-      toast("Фотография отправлена");
+    img.onload = async () => {
+      // No GPS overlay at all for this option -- only resized, exactly
+      // what "photo without a coordinate stamp" should mean. (The
+      // previous implementation stamped a fake Moscow GPS banner onto
+      // this path too; see BUG-007 in the audit.)
+      const canvas = drawResizedImage(img, false);
+      try {
+        const blob = await canvasToBlob(canvas);
+        const uploaded = await uploadMedia(blob, "image/jpeg");
+        await sendMessage(JSON.stringify({ type: "standard_photo", mediaPath: uploaded.mediaPath, contentType: uploaded.contentType }));
+        toast("Фотография отправлена");
+      } catch (err) {
+        toast(err.message || "Не удалось отправить фото");
+      }
     };
     img.src = evt.target.result;
   };
@@ -842,11 +1027,19 @@ $("#standardInput").addEventListener("change", (e) => {
 });
 
 $("#sendGeoPhoto").addEventListener("click", async () => {
-  if (!state.pendingGeoData) return;
+  if (!state.pendingGeoBlob || !state.pendingGeoMeta) return;
   $("#previewModal").classList.add("hidden");
-  await sendMessage(JSON.stringify(state.pendingGeoData));
-  toast("Фото с геолокацией отправлено!");
-  state.pendingGeoData = null;
+
+  try {
+    const uploaded = await uploadMedia(state.pendingGeoBlob, "image/jpeg");
+    const payload = { ...state.pendingGeoMeta, mediaPath: uploaded.mediaPath, contentType: uploaded.contentType };
+    await sendMessage(JSON.stringify(payload));
+    toast("Фото с геолокацией отправлено!");
+  } catch (err) {
+    toast(err.message || "Не удалось отправить фото");
+  }
+  state.pendingGeoBlob = null;
+  state.pendingGeoMeta = null;
 });
 
 $("#composer").addEventListener("submit", (event) => {
@@ -856,9 +1049,13 @@ $("#composer").addEventListener("submit", (event) => {
 
 $("#messageInput").addEventListener("input", () => {
   if (!state.socket || state.socket.readyState !== WebSocket.OPEN) return;
-  state.socket.send(JSON.stringify({ type: "typing", typing: true }));
+  if (!state.isTyping) {
+    state.isTyping = true;
+    state.socket.send(JSON.stringify({ type: "typing", typing: true }));
+  }
   clearTimeout(state.typingTimer);
   state.typingTimer = setTimeout(() => {
+    state.isTyping = false;
     if (state.socket?.readyState === WebSocket.OPEN) {
       state.socket.send(JSON.stringify({ type: "typing", typing: false }));
     }
@@ -867,5 +1064,3 @@ $("#messageInput").addEventListener("input", () => {
 
 if (state.roomId) loadRoom();
 else setOnline(false);
-
-

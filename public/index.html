@@ -29,6 +29,7 @@
     </div>
     </header>
 
+    <button class="outline load-older hidden" id="loadOlder">↑ Загрузить более старые сообщения</button>
     <section class="messages" id="messages">
       <div class="welcome">
         <div class="hero-mark">G</div>
@@ -118,7 +119,7 @@
     <div class="modal-actions center">
       <button class="new-chat record-btn" id="startRecordNote">⏺ Начать запись (до 30 сек)</button>
       <button class="new-chat hidden stop-btn" id="stopRecordNote">⏹ Завершить и отправить</button>
-      <button class="outline" id="fallbackVideoBtn" style="font-size:11px;">📂 Выбрать видеофайл</button>
+      <button class="outline btn-compact" id="fallbackVideoBtn">📂 Выбрать видеофайл</button>
     </div>
   </div>
 </div>
@@ -179,19 +180,19 @@
     <button class="close" id="closeCameraDiag">×</button>
     <small>ДИАГНОСТИКА КАМЕРЫ</small>
     <h2>Камера не отвечает</h2>
-    <div style="background:#111;border:1px solid #333;border-radius:10px;padding:12px;font-size:11px;color:#eee;margin:12px 0;">
-      <p style="margin:0 0 6px;color:var(--yellow)"><b id="diagErrorTitle">Ошибка доступа</b></p>
-      <div id="diagErrorDetail" style="font-family:monospace;color:#ccc;margin-bottom:8px;">NotReadableError / NotFoundError</div>
-      <div id="diagDeviceCount" style="color:#aaa;">Найдено видеоустройств: 0</div>
+    <div class="diag-box">
+      <p class="diag-title"><b id="diagErrorTitle">Ошибка доступа</b></p>
+      <div id="diagErrorDetail" class="diag-detail">NotReadableError / NotFoundError</div>
+      <div id="diagDeviceCount" class="diag-count">Найдено видеоустройств: 0</div>
     </div>
-    <p style="font-size:11px;color:#aaa;line-height:1.5;">
+    <p class="diag-help">
       <b>Как разблокировать камеру на ПК:</b><br>
       1. Нажмите комбинацию клавиш <b>Fn + F10</b> (или Fn + F6 / Fn + F7) для включения физической вебкамеры.<br>
       2. Проверьте микро-шторку над экраном.<br>
       3. В Windows: Параметры ➔ Конфиденциальность ➔ Камера ➔ Разрешить доступ браузеру.<br>
       4. Если у вас антивирус (Kaspersky/ESET) — разрешите доступ к веб-камере.
     </p>
-    <div class="modal-actions space-between" style="flex-wrap:wrap;gap:8px;">
+    <div class="modal-actions space-between wrap">
       <button class="outline" id="phoneCameraBtn">📱 Камера с телефона (QR)</button>
       <button class="outline" id="fallbackDiagFile">📂 Выбрать файл с диска</button>
       <button class="new-chat" id="retryCameraBtn">🔄 Попробовать снова</button>
@@ -205,10 +206,10 @@
     <small>МОБИЛЬНАЯ КАМЕРА</small>
     <h2>Откройте на телефоне</h2>
     <p>Наведите камеру смартфона на QR-код, чтобы мгновенно сделать фото или видеозаметку:</p>
-    <div style="background:#fff;padding:12px;border-radius:12px;display:inline-block;margin:12px 0;">
-      <img id="qrCodeImg" src="" alt="QR Code" style="width:180px;height:180px;display:block;">
+    <div class="qr-frame">
+      <img id="qrCodeImg" class="qr-image" src="" alt="QR Code">
     </div>
-    <p style="font-size:10px;color:var(--muted);">Снимок с телефона сразу появится в вашем чате на ноутбуке!</p>
+    <p class="qr-hint">Код одноразовый и действует 2 минуты. Снимок с телефона сразу появится в вашем чате на ноутбуке!</p>
   </div>
 </div>
 

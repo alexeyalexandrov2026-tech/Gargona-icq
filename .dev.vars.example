@@ -3,6 +3,11 @@
 SUPABASE_URL=https://YOUR_PROJECT.supabase.co
 SUPABASE_SECRET_KEY=sb_secret_REPLACE_ME
 
+# Required to use the /mcp endpoint at all. Leave unset to keep MCP
+# disabled (it responds 503 rather than silently accepting no auth).
+# Generate with: node -e "console.log(crypto.randomUUID()+crypto.randomUUID())"
+MCP_API_KEY=
+
 # Optional. Used only if you later enable the Gorgona AI endpoint.
 OPENAI_API_KEY=
 OPENAI_MODEL=gpt-5.6
