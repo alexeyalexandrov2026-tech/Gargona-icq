@@ -1,26 +1,37 @@
 const $ = (s) => document.querySelector(s);
 const parts = location.pathname.split("/").filter(Boolean);
 
+const _roomId = parts[0] === "c" ? parts[1] : null;
+
+function roomKey(key) {
+  return _roomId ? `gorgona.${_roomId}.${key}` : `gorgona.${key}`;
+}
+
 const state = {
-  roomId: parts[0] === "c" ? parts[1] : null,
+  roomId: _roomId,
   invite: new URLSearchParams(location.search).get("invite"),
-  participantId: localStorage.getItem("gorgona.participant"),
-  participantName: localStorage.getItem("gorgona.name"),
-  isAdmin: localStorage.getItem("gorgona.is_admin") === "true",
+  participantId: localStorage.getItem(roomKey("participant")),
+  participantName: localStorage.getItem(roomKey("name")),
+  isAdmin: localStorage.getItem(roomKey("is_admin")) === "true",
   socket: null,
   people: new Map(),
   typingTimer: null,
   pendingGeoData: null,
   cameraStream: null,
   facingMode: "user",
-  currentAdminReqId: null,
+  pendingJoinRequests: [],
   noteMediaRecorder: null,
   noteChunks: [],
   noteStream: null,
   noteTimer: null,
   callStream: null,
-  peerConnections: new Map()
+  peerConnections: new Map(),
+  reconnectAttempts: 0,
+  reconnectTimer: null,
+  intentionalClose: false
 };
+
+const MAX_WS_PAYLOAD = 900 * 1024;
 
 function toast(text) {
   const el = $("#toast");
@@ -56,10 +67,24 @@ function renderPeople() {
   for (const person of state.people.values()) {
     const row = document.createElement("div");
     row.className = "person";
-    const isAdminBadge = person.id === state.adminId ? " <small style='color:var(--yellow)'>(Админ)</small>" : "";
-    row.innerHTML = `<div class="avatar"></div><div><b></b>${isAdminBadge}<small>Участник</small></div>`;
-    row.querySelector(".avatar").textContent = initials(person.display_name || person.name);
-    row.querySelector("b").textContent = person.display_name || person.name;
+    const avatar = document.createElement("div");
+    avatar.className = "avatar";
+    avatar.textContent = initials(person.display_name || person.name);
+    const info = document.createElement("div");
+    const nameEl = document.createElement("b");
+    nameEl.textContent = person.display_name || person.name;
+    info.appendChild(nameEl);
+    if (person.id === state.adminId) {
+      const badge = document.createElement("small");
+      badge.style.color = "var(--yellow)";
+      badge.textContent = " (Админ)";
+      info.appendChild(badge);
+    }
+    const roleEl = document.createElement("small");
+    roleEl.textContent = "Участник";
+    info.appendChild(roleEl);
+    row.appendChild(avatar);
+    row.appendChild(info);
     root.appendChild(row);
   }
 }
@@ -158,7 +183,7 @@ async function createRoom() {
     return;
   }
 
-  localStorage.setItem("gorgona.is_admin", "true");
+  localStorage.setItem(roomKey("is_admin"), "true");
   state.isAdmin = true;
   location.href = data.url;
 }
@@ -196,8 +221,8 @@ async function completeJoin(name) {
 
   state.participantId = data.id;
   state.participantName = data.display_name;
-  localStorage.setItem("gorgona.participant", data.id);
-  localStorage.setItem("gorgona.name", data.display_name);
+  localStorage.setItem(roomKey("participant"), data.id);
+  localStorage.setItem(roomKey("name"), data.display_name);
 
   $("#waitingModal").classList.add("hidden");
   connect();
@@ -231,7 +256,7 @@ async function loadRoom() {
   
   if (data.participants.length > 0 && data.participants[0].id === state.participantId) {
     state.isAdmin = true;
-    localStorage.setItem("gorgona.is_admin", "true");
+    localStorage.setItem(roomKey("is_admin"), "true");
   }
 
   renderPeople();
@@ -242,7 +267,11 @@ async function loadRoom() {
 }
 
 function connect(requestingName = null) {
-  if (state.socket) state.socket.close();
+  if (state.socket) {
+    state.intentionalClose = true;
+    state.socket.close();
+  }
+  state.intentionalClose = false;
 
   const tempId = state.participantId || "pending-" + Math.random().toString(36).slice(2);
   const protocol = location.protocol === "https:" ? "wss:" : "ws:";
@@ -255,22 +284,30 @@ function connect(requestingName = null) {
 
   state.socket.addEventListener("open", () => {
     setOnline(true);
+    state.reconnectAttempts = 0;
+    clearTimeout(state.reconnectTimer);
     if (requestingName) {
       state.socket.send(JSON.stringify({ type: "join_request", name: requestingName }));
     }
   });
 
-  state.socket.addEventListener("close", () => setOnline(false));
-  state.socket.addEventListener("error", () => setOnline(false));
+  state.socket.addEventListener("close", () => {
+    setOnline(false);
+    if (!state.intentionalClose && state.participantId) {
+      const delay = Math.min(1000 * Math.pow(2, state.reconnectAttempts), 15000);
+      state.reconnectAttempts++;
+      state.reconnectTimer = setTimeout(() => connect(), delay);
+    }
+  });
+  state.socket.addEventListener("error", () => {});
 
   state.socket.addEventListener("message", async (event) => {
     let payload;
     try { payload = JSON.parse(event.data); } catch { return; }
 
     if (payload.type === "admin_join_request") {
-      state.currentAdminReqId = payload.requestId;
-      $("#adminReqName").textContent = payload.name;
-      $("#adminRequestModal").classList.remove("hidden");
+      state.pendingJoinRequests.push({ requestId: payload.requestId, name: payload.name });
+      showNextJoinRequest();
       toast(`Заявка на вход от ${payload.name}`);
       return;
     }
@@ -326,31 +363,49 @@ function connect(requestingName = null) {
   });
 }
 
+function showNextJoinRequest() {
+  if (state.pendingJoinRequests.length === 0) {
+    $("#adminRequestModal").classList.add("hidden");
+    return;
+  }
+  const req = state.pendingJoinRequests[0];
+  $("#adminReqName").textContent = req.name;
+  $("#adminRequestModal").classList.remove("hidden");
+}
+
 async function sendMessage(customBody = null) {
   const input = $("#messageInput");
   const body = customBody || input.value.trim();
 
   if (!body || !state.socket || state.socket.readyState !== WebSocket.OPEN) return;
 
-  state.socket.send(JSON.stringify({ type: "message", body }));
+  const wsPayload = JSON.stringify({ type: "message", body });
+  if (wsPayload.length > MAX_WS_PAYLOAD) {
+    toast("Файл слишком большой (макс ~900 КБ). Сожмите или выберите другой.");
+    return;
+  }
+
+  state.socket.send(wsPayload);
   if (!customBody) input.value = "";
   state.socket.send(JSON.stringify({ type: "typing", typing: false }));
 }
 
 $("#approveJoinBtn").addEventListener("click", () => {
-  if (state.currentAdminReqId && state.socket) {
-    state.socket.send(JSON.stringify({ type: "approve_join", requestId: state.currentAdminReqId }));
+  const req = state.pendingJoinRequests.shift();
+  if (req && state.socket) {
+    state.socket.send(JSON.stringify({ type: "approve_join", requestId: req.requestId }));
     toast("Заявка одобрена");
   }
-  $("#adminRequestModal").classList.add("hidden");
+  showNextJoinRequest();
 });
 
 $("#declineJoinBtn").addEventListener("click", () => {
-  if (state.currentAdminReqId && state.socket) {
-    state.socket.send(JSON.stringify({ type: "decline_join", requestId: state.currentAdminReqId }));
+  const req = state.pendingJoinRequests.shift();
+  if (req && state.socket) {
+    state.socket.send(JSON.stringify({ type: "decline_join", requestId: req.requestId }));
     toast("Заявка отклонена");
   }
-  $("#adminRequestModal").classList.add("hidden");
+  showNextJoinRequest();
 });
 
 $("#btnVideoNote").addEventListener("click", () => {
@@ -555,6 +610,24 @@ function leaveVideoCall() {
 $("#closeVideoCall").addEventListener("click", leaveVideoCall);
 $("#leaveCall").addEventListener("click", leaveVideoCall);
 
+$("#toggleMic").addEventListener("click", () => {
+  if (!state.callStream) return;
+  const audioTrack = state.callStream.getAudioTracks()[0];
+  if (audioTrack) {
+    audioTrack.enabled = !audioTrack.enabled;
+    $("#toggleMic").textContent = audioTrack.enabled ? "🎤 Микрофон" : "🔇 Микрофон выкл";
+  }
+});
+
+$("#toggleCam").addEventListener("click", () => {
+  if (!state.callStream) return;
+  const videoTrack = state.callStream.getVideoTracks()[0];
+  if (videoTrack) {
+    videoTrack.enabled = !videoTrack.enabled;
+    $("#toggleCam").textContent = videoTrack.enabled ? "📹 Камера" : "📷 Камера выкл";
+  }
+});
+
 async function handleWebRTCOffer(senderId, offer) {
   const pc = createPeerConnection(senderId);
   await pc.setRemoteDescription(new RTCSessionDescription(offer));
@@ -582,7 +655,15 @@ async function handleWebRTCIce(senderId, candidate) {
 }
 
 function createPeerConnection(targetId) {
-  const config = { iceServers: [{ urls: "stun:stun.l.google.com:19302" }] };
+  const config = {
+    iceServers: [
+      { urls: "stun:stun.l.google.com:19302" },
+      { urls: "stun:stun1.l.google.com:19302" },
+      { urls: "stun:stun.cloudflare.com:3478" },
+      { urls: "turn:turn.gorgona.chat:3478", username: "gorgona", credential: "gorgona" }
+    ],
+    iceTransportPolicy: "all"
+  };
   const pc = new RTCPeerConnection(config);
 
   if (state.callStream) {

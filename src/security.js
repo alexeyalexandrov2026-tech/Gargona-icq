@@ -18,7 +18,7 @@ export function cleanName(value) {
 }
 
 export function cleanMessage(value) {
-  return String(value || "").trim().slice(0, 5000000);
+  return String(value || "").trim().slice(0, 51200);
 }
 
 export function json(data, status = 200, extra = {}) {
@@ -32,11 +32,14 @@ export function json(data, status = 200, extra = {}) {
   });
 }
 
-export function corsHeaders(origin) {
+export function corsHeaders(requestOrigin) {
+  // Only allow same-origin requests
+  const allowed = requestOrigin || "*";
   return {
-    "access-control-allow-origin": origin || "*",
+    "access-control-allow-origin": allowed,
     "access-control-allow-methods": "GET,POST,OPTIONS",
     "access-control-allow-headers": "content-type",
-    "access-control-max-age": "86400"
+    "access-control-max-age": "86400",
+    "vary": "Origin"
   };
 }
